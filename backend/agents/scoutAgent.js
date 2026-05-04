@@ -6,8 +6,8 @@
 
 const axios = require("axios");
 const xml2js = require("xml2js");
+const { fetchLatestPapers } = require("../services/arxivService");
 
-const ARXIV_BASE = "https://export.arxiv.org/api/query";
 const GITHUB_BASE = "https://api.github.com";
 
 // GenAI research categories on ArXiv
@@ -27,41 +27,31 @@ const GENAI_KEYWORDS = [
 
 async function fetchArxivPapers(maxResults = 30) {
   try {
-    const query = GENAI_KEYWORDS
-      .slice(0, 6)
-      .map(k => `all:"${k}"`)
-      .join(" OR ");
-
-    const params = {
-      search_query: `(${query}) AND (cat:cs.AI OR cat:cs.LG OR cat:cs.CL OR cat:cs.CV)`,
-      start: 0,
-      max_results: maxResults,
-      sortBy: "submittedDate",
-      sortOrder: "descending"
-    };
-
-    const response = await axios.get(ARXIV_BASE, { params, timeout: 15000 });
-    const parsed = await xml2js.parseStringPromise(response.data);
-    const entries = parsed.feed.entry || [];
-
-    const papers = entries.map(entry => ({
-      id: entry.id?.[0]?.split("/abs/")[1] || "",
-      title: entry.title?.[0]?.replace(/\s+/g, " ").trim() || "",
-      authors: (entry.author || []).map(a => a.name?.[0]).filter(Boolean).slice(0, 5),
-      abstract: entry.summary?.[0]?.replace(/\s+/g, " ").trim() || "",
-      published: entry.published?.[0] || "",
-      updated: entry.updated?.[0] || "",
-      arxivUrl: entry.id?.[0] || "",
-      pdfUrl: entry.id?.[0]?.replace("/abs/", "/pdf/") + ".pdf" || "",
-      categories: (entry.category || []).map(c => c.$.term),
-      source: "arxiv"
-    }));
-
-    console.log(`[ScoutAgent] Fetched ${papers.length} papers from ArXiv`);
+    const papers = await fetchLatestPapers(maxResults);
     return papers;
   } catch (err) {
     console.error("[ScoutAgent] ArXiv fetch error:", err.message);
-    return [];
+    console.log("[ScoutAgent] Falling back to HuggingFace Papers API...");
+    try {
+      const response = await axios.get("https://huggingface.co/api/papers", { params: { limit: maxResults } });
+      const hfPapers = response.data.map(p => ({
+        id: p.id || "",
+        title: p.title || "",
+        authors: (p.authors || []).map(a => a.name).slice(0, 5),
+        abstract: p.summary || p.ai_summary || "",
+        published: p.publishedAt || new Date().toISOString(),
+        updated: p.publishedAt || new Date().toISOString(),
+        arxivUrl: `https://huggingface.co/papers/${p.id}`,
+        pdfUrl: `https://arxiv.org/pdf/${p.id}.pdf`,
+        categories: ["cs.AI"],
+        source: "huggingface"
+      }));
+      console.log(`[ScoutAgent] Fallback: Fetched ${hfPapers.length} papers from HuggingFace`);
+      return hfPapers;
+    } catch (hfErr) {
+      console.error("[ScoutAgent] HF Fallback failed:", hfErr.message);
+      return [];
+    }
   }
 }
 

@@ -7,9 +7,14 @@ const router = express.Router();
 const { runFullPipeline, getStatus, getLatestDigest } = require("../services/digestService");
 const { sendDigest, sendTestEmail } = require("../services/emailService");
 const { fetchArxivPapers } = require("../agents/scoutAgent");
+const { fetchLatestPapers } = require("../services/arxivService");
 const { analyzePaper } = require("../agents/analystAgent");
 const { validateIdea } = require("../agents/ideasAgent");
 const { generatePitch } = require("../agents/pitchAgent");
+const { chatWithResearch, generateTrends, explainPaper } = require("../services/claudeService");
+
+// In-memory cache for paper explanations
+const explanationCache = {};
 
 // GET /api/status - System status
 router.get("/status", (req, res) => {
@@ -39,6 +44,28 @@ router.post("/run", async (req, res) => {
   runFullPipeline({ skipEmail: skipEmail ?? false, recipients }).catch(err => {
     console.error("[API] Pipeline error:", err.message);
   });
+});
+
+// POST /api/pipeline/run - Alias for trigger full pipeline (per requirements)
+router.post("/pipeline/run", async (req, res) => {
+  const { skipEmail, recipients } = req.body || {};
+  console.log("[API] Pipeline/run trigger received");
+
+  res.json({ message: "Pipeline started. Poll /api/status for progress." });
+
+  runFullPipeline({ skipEmail: skipEmail ?? true, recipients }).catch(err => {
+    console.error("[API] Pipeline error:", err.message);
+  });
+});
+
+// GET /api/papers/fetch - Standalone fetch
+router.get("/papers/fetch", async (req, res) => {
+  try {
+    const papers = await fetchLatestPapers(30);
+    res.json({ success: true, count: papers.length, papers });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // POST /api/run-sync - Trigger pipeline and wait (for demo)
@@ -76,9 +103,73 @@ router.get("/repos", (req, res) => {
 });
 
 // GET /api/trends - Get trends
-router.get("/trends", (req, res) => {
+router.get("/trends", async (req, res) => {
   const digest = getLatestDigest();
-  res.json(digest?.trends || { topTrends: [], weekSummary: "", hotKeywords: [] });
+  if (!digest || !digest.papers || digest.papers.length === 0) {
+    return res.json({ topTrends: [], weekSummary: "No papers available for trend analysis.", trends: [] });
+  }
+  
+  // If we already generated trends for this digest (cached), return them
+  if (digest.generatedTrends) {
+    return res.json(digest.generatedTrends);
+  }
+
+  try {
+    const trendsResult = await generateTrends(digest.papers);
+    // Cache it in the digest
+    digest.generatedTrends = trendsResult;
+    res.json(trendsResult);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/research-chat - Ask questions about papers
+router.post("/research-chat", async (req, res) => {
+  const { question } = req.body;
+  if (!question) return res.status(400).json({ error: "question required" });
+  
+  const digest = getLatestDigest();
+  try {
+    const result = await chatWithResearch(question, digest);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/papers/:id/explain - Explain a paper
+router.post("/papers/:id/explain", async (req, res) => {
+  const { mode } = req.body; // beginner, developer, researcher
+  const paperId = req.params.id; // using index or arxiv id
+  
+  const cacheKey = `${paperId}_${mode}`;
+  if (explanationCache[cacheKey]) {
+    return res.json(explanationCache[cacheKey]);
+  }
+
+  const digest = getLatestDigest();
+  if (!digest || !digest.papers) return res.status(400).json({ error: "No papers available" });
+
+  // Find paper by ID or index
+  let paper = digest.papers.find(p => p.id === paperId || p.arxivUrl?.includes(paperId));
+  if (!paper) {
+    // Fallback to array index if id is just a number
+    const idx = parseInt(paperId, 10);
+    if (!isNaN(idx) && idx >= 0 && idx < digest.papers.length) {
+      paper = digest.papers[idx];
+    }
+  }
+
+  if (!paper) return res.status(404).json({ error: "Paper not found" });
+
+  try {
+    const result = await explainPaper(paper, mode || "beginner");
+    explanationCache[cacheKey] = result;
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/email/send - Manually send digest

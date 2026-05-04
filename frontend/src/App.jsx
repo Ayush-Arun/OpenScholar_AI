@@ -66,6 +66,22 @@ function StatCard({ label, value, sub, color = '#7c3aed' }) {
 
 function PaperCard({ paper, index }) {
   const [expanded, setExpanded] = useState(false)
+  const [explainMode, setExplainMode] = useState('beginner')
+  const [explanation, setExplanation] = useState(null)
+  const [isExplaining, setIsExplaining] = useState(false)
+
+  const handleExplain = async () => {
+    setExpanded(true); // ensure it's open
+    if (!explanation || explanation.mode !== explainMode) {
+      setIsExplaining(true);
+      const r = await api(`/papers/${index}/explain`, { method: 'POST', body: JSON.stringify({ mode: explainMode }) });
+      if (r?.explanation) {
+        setExplanation({ mode: explainMode, text: r.explanation });
+      }
+      setIsExplaining(false);
+    }
+  }
+
   const scoreData = [
     { axis: 'Relevance', A: paper.relevanceScore || 50 },
     { axis: 'Novelty', A: paper.noveltyScore || 50 },
@@ -172,13 +188,12 @@ function PaperCard({ paper, index }) {
           fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8,
           textDecoration: 'none', display: 'inline-block'
         }}>Read Paper →</a>
-        {paper.pdfUrl && (
-          <a href={paper.pdfUrl} target="_blank" rel="noreferrer" style={{
-            background: '#1e1e35', color: 'var(--text2)', border: '1px solid var(--border)',
-            fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8,
-            textDecoration: 'none', display: 'inline-block'
-          }}>PDF</a>
-        )}
+        <button onClick={handleExplain} disabled={isExplaining} style={{
+          background: 'linear-gradient(135deg,#f59e0b,#f97316)', color: '#000', border: 'none',
+          fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 8, cursor: isExplaining ? 'not-allowed' : 'pointer',
+        }}>
+          {isExplaining ? '⏳ Explaining...' : '✨ Explain'}
+        </button>
         <button onClick={() => setExpanded(!expanded)} style={{
           background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)',
           fontSize: 12, padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
@@ -187,6 +202,27 @@ function PaperCard({ paper, index }) {
           {expanded ? 'Less ↑' : 'More ↓'}
         </button>
       </div>
+
+      {expanded && explanation && (
+        <div style={{ marginTop: 16, background: '#1e1e35', border: '1px solid #7c3aed44', borderRadius: 12, padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ color: '#a855f7', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>✨ AI EXPLANATION</div>
+            <select value={explainMode} onChange={(e) => setExplainMode(e.target.value)} style={{
+              background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, padding: '4px 8px', outline: 'none'
+            }}>
+              <option value="beginner">Beginner</option>
+              <option value="developer">Developer</option>
+              <option value="researcher">Researcher</option>
+            </select>
+          </div>
+          {isExplaining && <div style={{ color: 'var(--text3)', fontSize: 12, fontStyle: 'italic' }}>Generating new explanation...</div>}
+          {!isExplaining && (
+            <div style={{ color: 'var(--text2)', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {explanation.text}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -296,6 +332,16 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false)
   const [pitchModal, setPitchModal] = useState(null)
   const [loadingPitch, setLoadingPitch] = useState(null)
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
+
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [isChatting, setIsChatting] = useState(false)
+
+  const [liveTrends, setLiveTrends] = useState(null)
+  const [isLoadingTrends, setIsLoadingTrends] = useState(false)
+
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
   const notify = (msg, type = 'success') => {
     setNotification({ msg, type })
@@ -309,6 +355,16 @@ export default function App() {
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  useEffect(() => {
+    if (tab === 'trends' && !liveTrends && !isLoadingTrends && digest?.papers?.length > 0) {
+      setIsLoadingTrends(true)
+      api('/trends').then(r => {
+        setLiveTrends(r)
+        setIsLoadingTrends(false)
+      })
+    }
+  }, [tab, digest, liveTrends, isLoadingTrends])
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -325,11 +381,40 @@ export default function App() {
     return () => clearInterval(interval)
   }, [isRunning, loadData])
 
+  const handleChat = async () => {
+    if (!chatInput.trim() || isChatting) return
+    const msg = chatInput
+    setChatInput('')
+    setChatMessages(prev => [...prev, { role: 'user', content: msg }])
+    setIsChatting(true)
+    const r = await api('/research-chat', { method: 'POST', body: JSON.stringify({ question: msg }) })
+    if (r?.answer) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: r.answer, sources: r.sources || [] }])
+    } else {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error answering your question.', sources: [] }])
+    }
+    setIsChatting(false)
+  }
+
   const triggerPipeline = async () => {
     if (isRunning) return
     setIsRunning(true)
     notify('🚀 Pipeline started! Scouting papers & repos...', 'info')
-    await api('/run', { method: 'POST', body: JSON.stringify({ skipEmail: false }) })
+    // Set skipEmail to true so it doesn't automatically send the email
+    await api('/pipeline/run', { method: 'POST', body: JSON.stringify({ skipEmail: true }) })
+  }
+
+  const sendDigestEmail = async () => {
+    if (isSendingEmail || !digest) return
+    setIsSendingEmail(true)
+    notify('📧 Sending digest to recipients...', 'info')
+    const r = await api('/email/send', { method: 'POST', body: JSON.stringify({}) })
+    if (r && !r.error && r.success !== false) {
+      notify('✅ Digest emailed successfully!')
+    } else {
+      notify(`❌ Error sending email: ${r?.error || 'Unknown error'}`, 'error')
+    }
+    setIsSendingEmail(false)
   }
 
   const sendEmail = async () => {
@@ -381,6 +466,7 @@ export default function App() {
 
   const TABS = [
     { id: 'overview', label: '⚡ Overview' },
+    { id: 'chat', label: '💬 Research Chat' },
     { id: 'papers', label: `📄 Papers ${papers.length ? `(${papers.length})` : ''}` },
     { id: 'repos', label: `💻 Repos ${repos.length ? `(${repos.length})` : ''}` },
     { id: 'trends', label: '📡 Trends' },
@@ -405,6 +491,34 @@ export default function App() {
         </div>
       )}
 
+      {/* Drawer Menu */}
+      {isDrawerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999 }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} onClick={() => setIsDrawerOpen(false)} />
+          <div style={{
+            position: 'absolute', top: 0, left: 0, bottom: 0, width: 280,
+            background: 'var(--surface)', borderRight: '1px solid var(--border)',
+            padding: 24, display: 'flex', flexDirection: 'column',
+            animation: 'fadeUp 0.3s ease'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Menu</div>
+              <button onClick={() => setIsDrawerOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => { setTab(t.id); setIsDrawerOpen(false); }} style={{
+                background: tab === t.id ? '#7c3aed22' : 'transparent',
+                border: 'none', color: tab === t.id ? '#a855f7' : 'var(--text2)',
+                padding: '12px 16px', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                textAlign: 'left', cursor: 'pointer', marginBottom: 8, transition: 'all 0.2s'
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header style={{
         background: 'var(--surface)', borderBottom: '1px solid var(--border)',
@@ -413,6 +527,12 @@ export default function App() {
         backdropFilter: 'blur(12px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={() => setIsDrawerOpen(true)} style={{
+            background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
           <div style={{
             width: 32, height: 32, background: 'linear-gradient(135deg,#7c3aed,#a855f7)',
             borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -441,6 +561,16 @@ export default function App() {
               {isRunning ? 'RUNNING' : 'READY'}
             </span>
           </div>
+
+          <button onClick={sendDigestEmail} disabled={isSendingEmail || !digest?.papers?.length} style={{
+            background: 'var(--surface2)', color: 'var(--text)',
+            border: '1px solid var(--border)', borderRadius: 8, padding: '8px 18px',
+            fontSize: 13, fontWeight: 700, cursor: (isSendingEmail || !digest?.papers?.length) ? 'not-allowed' : 'pointer',
+            opacity: (isSendingEmail || !digest?.papers?.length) ? 0.6 : 1,
+            transition: 'all 0.2s'
+          }}>
+            {isSendingEmail ? 'Sending...' : '📧 Send Email'}
+          </button>
 
           <button onClick={triggerPipeline} disabled={isRunning} style={{
             background: isRunning ? '#1e1e35' : 'linear-gradient(135deg,#7c3aed,#a855f7)',
@@ -631,36 +761,105 @@ export default function App() {
           </div>
         )}
 
+        {/* ── Chat Tab ── */}
+        {tab === 'chat' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '70vh' }}>
+            <div style={{ background: 'linear-gradient(135deg, #7c3aed11, #3b82f611)', border: '1px solid #7c3aed33', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>💬 Research Chat (RAG)</h2>
+              <p style={{ color: 'var(--text2)', fontSize: 13 }}>Ask questions about the latest research papers in your digest.</p>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {chatMessages.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text3)', margin: 'auto' }}>
+                  No messages yet. Ask me about RAG, Agents, or Multimodal models!
+                </div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{
+                    background: m.role === 'user' ? '#7c3aed' : '#1e1e35',
+                    color: m.role === 'user' ? '#fff' : 'var(--text)',
+                    padding: '10px 14px', borderRadius: 12, maxWidth: '80%',
+                    borderBottomRightRadius: m.role === 'user' ? 2 : 12,
+                    borderBottomLeftRadius: m.role === 'assistant' ? 2 : 12,
+                    fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap'
+                  }}>
+                    {m.content}
+                  </div>
+                  {m.sources?.length > 0 && (
+                    <div style={{ marginTop: 8, maxWidth: '80%', background: '#111120', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+                      <div style={{ color: 'var(--text3)', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>SOURCES USED</div>
+                      {m.sources.map((s, idx) => (
+                        <div key={idx} style={{ marginBottom: 4 }}>
+                          <a href={s.url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>{s.title}</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {isChatting && (
+                <div style={{ alignSelf: 'flex-start', background: '#1e1e35', padding: '10px 14px', borderRadius: 12, fontSize: 13, color: 'var(--text3)' }}>
+                  Thinking...
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input 
+                value={chatInput} onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleChat()}
+                placeholder="Ask about a paper or topic..."
+                style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', color: 'var(--text)', fontSize: 14, outline: 'none' }}
+              />
+              <button onClick={handleChat} disabled={isChatting || !chatInput.trim()} style={{
+                background: isChatting ? '#1e1e35' : 'linear-gradient(135deg,#7c3aed,#a855f7)',
+                color: isChatting ? 'var(--text3)' : '#fff', border: 'none', borderRadius: 8, padding: '0 24px', fontWeight: 700, cursor: isChatting ? 'not-allowed' : 'pointer'
+              }}>
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Trends Tab ── */}
         {tab === 'trends' && (
           <div>
-            {trends.weekSummary && (
-              <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderLeft: '3px solid #f59e0b', borderRadius: 10, padding: 20, marginBottom: 24
-              }}>
-                <div style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>WEEKLY SUMMARY</div>
-                <p style={{ color: 'var(--text2)', lineHeight: 1.7 }}>{trends.weekSummary}</p>
-              </div>
-            )}
-            <h2 style={{ fontSize: 15, fontWeight: 800, marginBottom: 16 }}>📡 Trend Radar</h2>
-            {(trends.topTrends || []).map((t, i) => <TrendCard key={i} trend={t} index={i} />)}
-            {trends.hotKeywords?.length > 0 && (
-              <div style={{ marginTop: 24 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🔥 Hot Keywords</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {trends.hotKeywords.map((k, i) => (
-                    <span key={i} style={{
-                      background: '#f59e0b18', color: '#f59e0b', border: '1px solid #f59e0b33',
-                      fontSize: 13, padding: '6px 14px', borderRadius: 99, fontFamily: 'var(--mono)'
-                    }}>{k}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {!trends.topTrends?.length && (
+            {isLoadingTrends ? (
               <div style={{ textAlign: 'center', padding: 48, color: 'var(--text3)' }}>
-                Run the pipeline to detect trends
+                ⏳ Analyzing trends with Claude...
+              </div>
+            ) : liveTrends ? (
+              <>
+                <div style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderLeft: '3px solid #f59e0b', borderRadius: 10, padding: 20, marginBottom: 24
+                }}>
+                  <div style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>WEEKLY SUMMARY</div>
+                  <p style={{ color: 'var(--text2)', lineHeight: 1.7 }}>{liveTrends.weeklySummary}</p>
+                </div>
+                <h2 style={{ fontSize: 15, fontWeight: 800, marginBottom: 16 }}>📡 Top Trends</h2>
+                {liveTrends.trends?.map((t, i) => (
+                  <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700 }}>{t.topic}</span>
+                      <span style={{ color: t.direction === 'up' ? '#22c55e' : t.direction === 'down' ? '#ef4444' : '#f59e0b', fontSize: 12, fontWeight: 700 }}>
+                        {t.direction?.toUpperCase()} ({t.count} papers)
+                      </span>
+                    </div>
+                    <p style={{ color: 'var(--text2)', fontSize: 13, marginBottom: 8 }}>{t.explanation}</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(t.relatedPapers || []).map((rp, idx) => (
+                        <span key={idx} style={{ background: '#1e1e35', color: 'var(--text3)', fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>{rp.slice(0, 40)}...</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--text3)' }}>
+                Run the pipeline to fetch papers before analyzing trends.
               </div>
             )}
           </div>
