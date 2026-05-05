@@ -343,6 +343,15 @@ export default function App() {
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
+  // Snap2Research state
+  const [snapImage, setSnapImage] = useState(null)       // { file, previewUrl }
+  const [snapLoading, setSnapLoading] = useState(false)
+  const [snapResult, setSnapResult] = useState(null)     // { imageAnalysis, papers }
+  const [snapError, setSnapError] = useState(null)
+  const [buildPlan, setBuildPlan] = useState(null)       // generated project blueprint
+  const [buildPlanLoading, setBuildPlanLoading] = useState(false)
+  const [buildPlanModal, setBuildPlanModal] = useState(false)
+
   const notify = (msg, type = 'success') => {
     setNotification({ msg, type })
     setTimeout(() => setNotification(null), 4000)
@@ -389,9 +398,15 @@ export default function App() {
     setIsChatting(true)
     const r = await api('/research-chat', { method: 'POST', body: JSON.stringify({ question: msg }) })
     if (r?.answer) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: r.answer, sources: r.sources || [] }])
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: r.answer,
+        sources: r.sources || [],
+        source: r.source || 'local',          // "local" | "web"
+        fetchedPapers: r.fetchedPapers || []  // arXiv papers from web fallback
+      }])
     } else {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error answering your question.', sources: [] }])
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error answering your question.', sources: [], source: 'local', fetchedPapers: [] }])
     }
     setIsChatting(false)
   }
@@ -471,6 +486,7 @@ export default function App() {
     { id: 'repos', label: `💻 Repos ${repos.length ? `(${repos.length})` : ''}` },
     { id: 'trends', label: '📡 Trends' },
     { id: 'ideas', label: `🚀 Build Ideas ${ideas.length ? `(${ideas.length})` : ''}` },
+    { id: 'snap2research', label: '📸 Snap2Research' },
     { id: 'settings', label: '⚙️ Settings' },
   ]
 
@@ -765,30 +781,58 @@ export default function App() {
         {tab === 'chat' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: '70vh' }}>
             <div style={{ background: 'linear-gradient(135deg, #7c3aed11, #3b82f611)', border: '1px solid #7c3aed33', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>💬 Research Chat (RAG)</h2>
-              <p style={{ color: 'var(--text2)', fontSize: 13 }}>Ask questions about the latest research papers in your digest.</p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>💬 Research Chat (RAG + Web)</h2>
+                  <p style={{ color: 'var(--text2)', fontSize: 13 }}>Ask anything — uses your digest first, then fetches live from arXiv if needed.</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ background: '#3b82f622', color: '#3b82f6', border: '1px solid #3b82f633', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>🔵 From Digest</span>
+                  <span style={{ background: '#a855f722', color: '#a855f7', border: '1px solid #a855f733', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>🟣 From Web</span>
+                </div>
+              </div>
             </div>
-            
+
             <div style={{ flex: 1, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
               {chatMessages.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--text3)', margin: 'auto' }}>
-                  No messages yet. Ask me about RAG, Agents, or Multimodal models!
+                  <div style={{ fontSize: 28, marginBottom: 10 }}>🔬</div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Ask me anything about AI research</div>
+                  <div style={{ fontSize: 12 }}>e.g. "What is RAG?", "AI in healthcare papers", "Explain diffusion models"</div>
                 </div>
               )}
               {chatMessages.map((m, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+
+                  {/* Source badge for assistant messages */}
+                  {m.role === 'assistant' && m.source && (
+                    <div style={{ marginBottom: 4 }}>
+                      {m.source === 'web' ? (
+                        <span style={{ background: '#a855f722', color: '#a855f7', border: '1px solid #a855f733', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                          🟣 Fetched latest papers from the web for your query
+                        </span>
+                      ) : (
+                        <span style={{ background: '#3b82f622', color: '#3b82f6', border: '1px solid #3b82f633', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99 }}>
+                          🔵 Answering from your research digest
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{
                     background: m.role === 'user' ? '#7c3aed' : '#1e1e35',
                     color: m.role === 'user' ? '#fff' : 'var(--text)',
-                    padding: '10px 14px', borderRadius: 12, maxWidth: '80%',
+                    padding: '10px 14px', borderRadius: 12, maxWidth: '85%',
                     borderBottomRightRadius: m.role === 'user' ? 2 : 12,
                     borderBottomLeftRadius: m.role === 'assistant' ? 2 : 12,
                     fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap'
                   }}>
                     {m.content}
                   </div>
+
+                  {/* Sources used panel */}
                   {m.sources?.length > 0 && (
-                    <div style={{ marginTop: 8, maxWidth: '80%', background: '#111120', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+                    <div style={{ marginTop: 8, maxWidth: '85%', background: '#111120', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
                       <div style={{ color: 'var(--text3)', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>SOURCES USED</div>
                       {m.sources.map((s, idx) => (
                         <div key={idx} style={{ marginBottom: 4 }}>
@@ -797,20 +841,63 @@ export default function App() {
                       ))}
                     </div>
                   )}
+
+                  {/* Fetched papers grid (web source only) */}
+                  {m.role === 'assistant' && m.source === 'web' && m.fetchedPapers?.length > 0 && (
+                    <div style={{ marginTop: 12, maxWidth: '95%', width: '100%' }}>
+                      <div style={{ color: 'var(--text3)', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>
+                        📄 {m.fetchedPapers.length} PAPERS FETCHED FROM arXiv
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {m.fetchedPapers.slice(0, 6).map((p, pi) => (
+                          <div key={pi} style={{
+                            background: 'var(--surface)', border: '1px solid var(--border)',
+                            borderLeft: '3px solid #a855f7', borderRadius: 10, padding: '12px 14px',
+                            transition: 'border-color 0.2s'
+                          }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = '#a855f7'}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+                              <h4 style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.4, color: 'var(--text)', flex: 1 }}>{p.title}</h4>
+                              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                {p.categories?.slice(0, 1).map((cat, ci) => (
+                                  <span key={ci} style={{ background: '#7c3aed18', color: '#a855f7', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 6, fontFamily: 'var(--mono)' }}>{cat}</span>
+                                ))}
+                              </div>
+                            </div>
+                            <p style={{ color: 'var(--text3)', fontSize: 11, lineHeight: 1.5, marginBottom: 8 }}>
+                              {p.abstract?.slice(0, 180)}{p.abstract?.length > 180 ? '...' : ''}
+                            </p>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ color: 'var(--text3)', fontSize: 10 }}>{p.publishedDate?.slice(0, 10)}</span>
+                              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                                <a href={p.arxivUrl} target="_blank" rel="noreferrer" style={{ background: '#7c3aed22', color: '#a855f7', border: '1px solid #7c3aed44', fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 6, textDecoration: 'none' }}>Read →</a>
+                                <a href={p.pdfUrl} target="_blank" rel="noreferrer" style={{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444433', fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 6, textDecoration: 'none' }}>PDF ↓</a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               ))}
               {isChatting && (
-                <div style={{ alignSelf: 'flex-start', background: '#1e1e35', padding: '10px 14px', borderRadius: 12, fontSize: 13, color: 'var(--text3)' }}>
-                  Thinking...
+                <div style={{ alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ background: '#1e1e35', padding: '10px 14px', borderRadius: 12, fontSize: 13, color: 'var(--text3)' }}>
+                    ⏳ Searching papers &amp; generating answer...
+                  </div>
                 </div>
               )}
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
-              <input 
+              <input
                 value={chatInput} onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleChat()}
-                placeholder="Ask about a paper or topic..."
+                placeholder="Ask about a paper or topic... e.g. 'AI in healthcare'"
                 style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', color: 'var(--text)', fontSize: 14, outline: 'none' }}
               />
               <button onClick={handleChat} disabled={isChatting || !chatInput.trim()} style={{
@@ -822,6 +909,7 @@ export default function App() {
             </div>
           </div>
         )}
+
 
         {/* ── Trends Tab ── */}
         {tab === 'trends' && (
@@ -1062,6 +1150,557 @@ export default function App() {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* ── Snap2Research Tab ── */}
+        {tab === 'snap2research' && (
+          <div style={{ maxWidth: 900, margin: '0 auto' }}>
+
+            {/* Hero Banner */}
+            <div style={{
+              background: 'linear-gradient(135deg, #7c3aed22, #06b6d422)',
+              border: '1px solid #7c3aed44',
+              borderRadius: 16, padding: '28px 32px', marginBottom: 28,
+              position: 'relative', overflow: 'hidden'
+            }}>
+              <div style={{
+                position: 'absolute', top: -30, right: -30, width: 120, height: 120,
+                background: 'radial-gradient(circle, #7c3aed33, transparent)',
+                borderRadius: '50%'
+              }} />
+              <div style={{ fontSize: 36, marginBottom: 10 }}>📸</div>
+              <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>
+                Snap<span style={{ color: '#a855f7' }}>2</span>Research
+              </h2>
+              <p style={{ color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, maxWidth: 540 }}>
+                Upload or capture any photo — our AI analyzes it, extracts research topics,
+                and finds related AI/GenAI papers from arXiv instantly.
+              </p>
+            </div>
+
+            {/* Upload Section */}
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)', padding: 24, marginBottom: 20
+            }}>
+              <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 16 }}>UPLOAD IMAGE</div>
+
+              {/* Drop area */}
+              <label htmlFor="snap-upload" style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                border: '2px dashed #7c3aed55', borderRadius: 12, padding: 32, cursor: 'pointer',
+                background: snapImage ? '#7c3aed08' : 'transparent',
+                transition: 'all 0.2s', marginBottom: 16,
+                minHeight: 120
+              }}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault()
+                  const file = e.dataTransfer.files[0]
+                  if (file && file.type.startsWith('image/')) {
+                    setSnapImage({ file, previewUrl: URL.createObjectURL(file) })
+                    setSnapResult(null); setSnapError(null)
+                  }
+                }}
+              >
+                {snapImage ? (
+                  <span style={{ color: '#a855f7', fontSize: 13, fontWeight: 600 }}>✅ {snapImage.file.name} — click to change</span>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 32, marginBottom: 8 }}>🖼️</span>
+                    <span style={{ color: 'var(--text2)', fontSize: 13 }}>Drag & drop or click to upload</span>
+                    <span style={{ color: 'var(--text3)', fontSize: 11, marginTop: 4 }}>JPG, PNG, WEBP — max 10 MB</span>
+                  </>
+                )}
+              </label>
+              <input
+                id="snap-upload"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    setSnapImage({ file, previewUrl: URL.createObjectURL(file) })
+                    setSnapResult(null); setSnapError(null)
+                  }
+                }}
+              />
+
+              {/* Preview */}
+              {snapImage && (
+                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 16 }}>
+                  <img
+                    src={snapImage.previewUrl}
+                    alt="Preview"
+                    style={{ width: 160, height: 120, objectFit: 'cover', borderRadius: 10, border: '1px solid #7c3aed44' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{snapImage.file.name}</div>
+                    <div style={{ color: 'var(--text3)', fontSize: 12 }}>{(snapImage.file.size / 1024).toFixed(0)} KB · {snapImage.file.type}</div>
+                    <button
+                      onClick={() => { setSnapImage(null); setSnapResult(null); setSnapError(null) }}
+                      style={{
+                        marginTop: 10, background: '#ef444418', color: '#ef4444',
+                        border: '1px solid #ef444433', borderRadius: 6,
+                        fontSize: 11, fontWeight: 700, padding: '4px 12px', cursor: 'pointer'
+                      }}
+                    >Remove ×</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Analyze Button */}
+              <button
+                id="snap-analyze-btn"
+                onClick={async () => {
+                  if (!snapImage || snapLoading) return
+                  setSnapLoading(true)
+                  setSnapError(null)
+                  setSnapResult(null)
+                  try {
+                    const formData = new FormData()
+                    formData.append('image', snapImage.file)
+                    const resp = await fetch(`${API}/image-research`, { method: 'POST', body: formData })
+                    const data = await resp.json()
+                    if (data.success) {
+                      setSnapResult(data)
+                    } else {
+                      setSnapError(data.error || 'Analysis failed. Please try again.')
+                    }
+                  } catch (e) {
+                    setSnapError('Network error. Is the backend running?')
+                  }
+                  setSnapLoading(false)
+                }}
+                disabled={!snapImage || snapLoading}
+                style={{
+                  width: '100%',
+                  background: (!snapImage || snapLoading) ? '#1e1e35' : 'linear-gradient(135deg,#7c3aed,#a855f7)',
+                  color: (!snapImage || snapLoading) ? 'var(--text3)' : '#fff',
+                  border: 'none', borderRadius: 10, padding: '14px 0',
+                  fontSize: 15, fontWeight: 800, cursor: (!snapImage || snapLoading) ? 'not-allowed' : 'pointer',
+                  boxShadow: snapImage && !snapLoading ? '0 0 20px #7c3aed44' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {snapLoading ? '⏳ Analyzing image & fetching papers...' : '🔬 Analyze Image'}
+              </button>
+            </div>
+
+            {/* Loading Pulse */}
+            {snapLoading && (
+              <div style={{
+                background: 'var(--surface)', border: '1px solid #7c3aed33',
+                borderRadius: 12, padding: 32, textAlign: 'center', marginBottom: 20
+              }}>
+                <div style={{ fontSize: 36, marginBottom: 12, animation: 'pulse 1.5s ease infinite' }}>🔭</div>
+                <div style={{ color: '#a855f7', fontWeight: 700, fontSize: 14, marginBottom: 8 }}>AI is analyzing your image...</div>
+                <div style={{ color: 'var(--text3)', fontSize: 12 }}>Extracting research topics → Searching arXiv → Compiling results</div>
+              </div>
+            )}
+
+            {/* Error */}
+            {snapError && (
+              <div style={{
+                background: '#ef444411', border: '1px solid #ef444433',
+                borderRadius: 12, padding: 20, marginBottom: 20, color: '#ef4444', fontSize: 14
+              }}>
+                ❌ {snapError}
+              </div>
+            )}
+
+            {/* Results */}
+            {snapResult && (
+              <div style={{ animation: 'fadeUp 0.5s ease' }}>
+
+                {/* ── Generate Build Plan CTA ── */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #f59e0b11, #f9731611)',
+                  border: '1px solid #f59e0b44', borderRadius: 14, padding: '18px 22px',
+                  marginBottom: 20, display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
+                }}>
+                  <div>
+                    <div style={{ color: '#f59e0b', fontSize: 13, fontWeight: 800, marginBottom: 3 }}>🏗️ Ready to build?</div>
+                    <div style={{ color: 'var(--text3)', fontSize: 12 }}>Generate a full project blueprint — roadmap, tech stack &amp; architecture</div>
+                  </div>
+                  <button
+                    id="snap-build-plan-btn"
+                    onClick={async () => {
+                      if (buildPlanLoading) return
+                      setBuildPlanLoading(true)
+                      setBuildPlan(null)
+                      try {
+                        const resp = await api('/snap2research/build-plan', {
+                          method: 'POST',
+                          body: JSON.stringify({ imageAnalysis: snapResult.imageAnalysis, papers: snapResult.papers })
+                        })
+                        if (resp?.success) {
+                          setBuildPlan(resp.buildPlan)
+                          setBuildPlanModal(true)
+                        } else {
+                          notify(`❌ ${resp?.error || 'Build plan failed'}`, 'error')
+                        }
+                      } catch (e) {
+                        notify('❌ Network error generating build plan', 'error')
+                      }
+                      setBuildPlanLoading(false)
+                    }}
+                    disabled={buildPlanLoading}
+                    style={{
+                      background: buildPlanLoading ? '#1e1e35' : 'linear-gradient(135deg,#f59e0b,#f97316)',
+                      color: buildPlanLoading ? 'var(--text3)' : '#000',
+                      border: 'none', borderRadius: 10, padding: '11px 22px',
+                      fontSize: 13, fontWeight: 800, cursor: buildPlanLoading ? 'not-allowed' : 'pointer',
+                      boxShadow: buildPlanLoading ? 'none' : '0 0 18px #f59e0b55',
+                      whiteSpace: 'nowrap', transition: 'all 0.2s'
+                    }}
+                  >
+                    {buildPlanLoading ? '⏳ Generating Blueprint...' : '🏗️ Generate Project Blueprint'}
+                  </button>
+                </div>
+
+                {/* Analysis Summary */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>📊 IMAGE ANALYSIS RESULTS</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+
+                    {/* Detected Objects */}
+                    {snapResult.imageAnalysis.detectedObjects?.length > 0 && (
+                      <div style={{
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 10, padding: 16
+                      }}>
+                        <div style={{ color: '#06b6d4', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>👁️ DETECTED OBJECTS</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {snapResult.imageAnalysis.detectedObjects.map((obj, i) => (
+                            <span key={i} style={{
+                              background: '#06b6d418', color: '#06b6d4',
+                              border: '1px solid #06b6d433', fontSize: 11,
+                              padding: '3px 10px', borderRadius: 99
+                            }}>{obj}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Possible Domains */}
+                    {snapResult.imageAnalysis.possibleDomains?.length > 0 && (
+                      <div style={{
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 10, padding: 16
+                      }}>
+                        <div style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>🌐 RESEARCH DOMAINS</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {snapResult.imageAnalysis.possibleDomains.map((d, i) => (
+                            <span key={i} style={{
+                              background: '#f59e0b18', color: '#f59e0b',
+                              border: '1px solid #f59e0b33', fontSize: 11,
+                              padding: '3px 10px', borderRadius: 99
+                            }}>{d}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Main Problem */}
+                  {snapResult.imageAnalysis.mainProblem && (
+                    <div style={{
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderLeft: '3px solid #7c3aed', borderRadius: 10, padding: 16, marginBottom: 12
+                    }}>
+                      <div style={{ color: '#a855f7', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>🎯 MAIN RESEARCH PROBLEM</div>
+                      <p style={{ color: 'var(--text2)', fontSize: 13, lineHeight: 1.6 }}>{snapResult.imageAnalysis.mainProblem}</p>
+                    </div>
+                  )}
+
+                  {/* Keywords Row */}
+                  {snapResult.imageAnalysis.researchKeywords?.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>🔑 RESEARCH KEYWORDS</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {snapResult.imageAnalysis.researchKeywords.map((kw, i) => (
+                          <span key={i} style={{
+                            background: '#7c3aed18', color: '#a855f7',
+                            border: '1px solid #7c3aed33', fontSize: 12,
+                            padding: '4px 12px', borderRadius: 99
+                          }}>{kw}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Project Ideas */}
+                  {snapResult.imageAnalysis.projectIdeas?.length > 0 && (
+                    <div style={{
+                      background: 'linear-gradient(135deg,#22c55e0d,#7c3aed0d)',
+                      border: '1px solid #22c55e33', borderRadius: 10, padding: 16, marginBottom: 12
+                    }}>
+                      <div style={{ color: '#22c55e', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>💡 BUILDABLE PROJECT IDEAS</div>
+                      {snapResult.imageAnalysis.projectIdeas.map((idea, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6 }}>
+                          <span style={{ color: '#a855f7', fontWeight: 800, minWidth: 18 }}>{i + 1}.</span>
+                          <span style={{ color: 'var(--text2)', fontSize: 13 }}>{idea}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Related Papers */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>📄 RELATED RESEARCH PAPERS</div>
+                    <span style={{ background: '#7c3aed22', color: '#a855f7', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>
+                      {snapResult.papers.length} found
+                    </span>
+                  </div>
+
+                  {snapResult.papers.length === 0 ? (
+                    <div style={{
+                      background: 'var(--surface)', border: '1px dashed var(--border)',
+                      borderRadius: 12, padding: 36, textAlign: 'center', color: 'var(--text3)', fontSize: 14
+                    }}>
+                      No related papers found. Try another image.
+                    </div>
+                  ) : (
+                    snapResult.papers.map((paper, i) => (
+                      <div key={i} style={{
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius)', padding: 18, marginBottom: 12,
+                        animation: `fadeUp 0.4s ease ${i * 0.05}s both`,
+                        transition: 'border-color 0.2s'
+                      }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed55'}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            <h3 style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.4, color: 'var(--text)', marginBottom: 4 }}>
+                              {paper.title}
+                            </h3>
+                            <p style={{ color: 'var(--text3)', fontSize: 12 }}>
+                              {(paper.authors || []).slice(0, 3).join(', ')}{paper.authors?.length > 3 ? ' et al.' : ''}
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignItems: 'flex-end' }}>
+                            {paper.categories?.slice(0, 2).map((cat, ci) => (
+                              <span key={ci} style={{
+                                background: '#7c3aed18', color: '#a855f7',
+                                fontSize: 10, fontWeight: 700, padding: '2px 8px',
+                                borderRadius: 99, fontFamily: 'var(--mono)', whiteSpace: 'nowrap'
+                              }}>{cat}</span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <p style={{ color: 'var(--text2)', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
+                          {paper.abstract?.slice(0, 240)}{paper.abstract?.length > 240 ? '...' : ''}
+                        </p>
+
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          {paper.publishedDate && (
+                            <span style={{ color: 'var(--text3)', fontSize: 11 }}>
+                              📅 {paper.publishedDate?.slice(0, 10)}
+                            </span>
+                          )}
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                            <a href={paper.arxivUrl} target="_blank" rel="noreferrer" style={{
+                              background: '#7c3aed22', color: '#a855f7',
+                              border: '1px solid #7c3aed44', fontSize: 11, fontWeight: 600,
+                              padding: '5px 12px', borderRadius: 6, textDecoration: 'none'
+                            }}>Read Paper →</a>
+                            <a href={paper.pdfUrl} target="_blank" rel="noreferrer" style={{
+                              background: '#ef444418', color: '#ef4444',
+                              border: '1px solid #ef444433', fontSize: 11, fontWeight: 600,
+                              padding: '5px 12px', borderRadius: 6, textDecoration: 'none'
+                            }}>PDF ↓</a>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Build Plan Modal ── */}
+        {buildPlanModal && buildPlan && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)', zIndex: 9000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            backdropFilter: 'blur(6px)'
+          }} onClick={() => setBuildPlanModal(false)}>
+            <div style={{
+              background: 'var(--bg)', border: '1px solid var(--border2)',
+              borderRadius: 18, padding: 32, maxWidth: 840, width: '100%', maxHeight: '92vh',
+              overflowY: 'auto', position: 'relative', animation: 'fadeUp 0.4s ease'
+            }} onClick={e => e.stopPropagation()}>
+
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 6 }}>🏗️ PROJECT BLUEPRINT</div>
+                  <h2 style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.2, marginBottom: 6 }}>{buildPlan.projectTitle}</h2>
+                  <p style={{ color: '#a855f7', fontSize: 13, fontStyle: 'italic' }}>"{buildPlan.tagline}"</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
+                  <span style={{
+                    background: buildPlan.difficultyLevel === 'Advanced' ? '#ef444422' : buildPlan.difficultyLevel === 'Beginner' ? '#22c55e22' : '#f59e0b22',
+                    color: buildPlan.difficultyLevel === 'Advanced' ? '#ef4444' : buildPlan.difficultyLevel === 'Beginner' ? '#22c55e' : '#f59e0b',
+                    border: `1px solid ${buildPlan.difficultyLevel === 'Advanced' ? '#ef444433' : buildPlan.difficultyLevel === 'Beginner' ? '#22c55e33' : '#f59e0b33'}`,
+                    fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 99
+                  }}>{buildPlan.difficultyLevel}</span>
+                  <span style={{ background: '#3b82f622', color: '#3b82f6', border: '1px solid #3b82f633', fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 99 }}>⏱ {buildPlan.estimatedTime}</span>
+                  <button onClick={() => setBuildPlanModal(false)} style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text3)',
+                    borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700
+                  }}>✕</button>
+                </div>
+              </div>
+
+              {/* Problem Statement */}
+              <div style={{ background: '#7c3aed11', border: '1px solid #7c3aed33', borderLeft: '4px solid #7c3aed', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+                <div style={{ color: '#a855f7', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>🎯 PROBLEM STATEMENT</div>
+                <p style={{ color: 'var(--text2)', fontSize: 14, lineHeight: 1.7 }}>{buildPlan.problemStatement}</p>
+              </div>
+
+              {/* Unique Angle */}
+              {buildPlan.uniqueAngle && (
+                <div style={{ background: '#22c55e11', border: '1px solid #22c55e33', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: 18 }}>⭐</span>
+                  <div>
+                    <div style={{ color: '#22c55e', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>UNIQUE ANGLE</div>
+                    <p style={{ color: 'var(--text2)', fontSize: 13 }}>{buildPlan.uniqueAngle}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Core Features */}
+              {buildPlan.coreFeatures?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>⚡ CORE FEATURES</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {buildPlan.coreFeatures.map((f, i) => (
+                      <div key={i} style={{
+                        background: 'var(--surface)', border: `1px solid ${f.priority === 'Must-have' ? '#7c3aed44' : 'var(--border)'}`,
+                        borderRadius: 10, padding: '12px 14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700 }}>{f.feature}</span>
+                          <span style={{
+                            background: f.priority === 'Must-have' ? '#7c3aed22' : '#47556922',
+                            color: f.priority === 'Must-have' ? '#a855f7' : 'var(--text3)',
+                            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99
+                          }}>{f.priority}</span>
+                        </div>
+                        <p style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.5 }}>{f.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tech Stack */}
+              {buildPlan.techStack && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>🛠️ TECH STACK</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {Object.entries(buildPlan.techStack).map(([layer, items]) => (
+                      <div key={layer} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+                        <div style={{ color: 'var(--text3)', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>{layer}</div>
+                        {(items || []).map((tech, i) => (
+                          <span key={i} style={{
+                            display: 'inline-block', background: '#7c3aed18', color: '#a855f7',
+                            border: '1px solid #7c3aed33', fontSize: 11, fontWeight: 600,
+                            padding: '2px 8px', borderRadius: 6, margin: '2px 2px 2px 0',
+                            fontFamily: 'var(--mono)'
+                          }}>{tech}</span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Datasets & APIs */}
+              {buildPlan.datasetsAndAPIs?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>📦 DATASETS & APIs</div>
+                  {buildPlan.datasetsAndAPIs.map((d, i) => (
+                    <div key={i} style={{
+                      display: 'flex', gap: 14, alignItems: 'flex-start', background: 'var(--surface)',
+                      border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8
+                    }}>
+                      <span style={{ color: '#06b6d4', fontWeight: 800, fontSize: 12, minWidth: 20 }}>{i + 1}.</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700 }}>{d.name}</div>
+                        <div style={{ color: 'var(--text3)', fontSize: 12, marginTop: 2 }}>{d.purpose}</div>
+                        {d.url && <div style={{ color: '#06b6d4', fontSize: 11, marginTop: 2 }}>{d.url}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Architecture */}
+              {buildPlan.architecture && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>🏛️ SYSTEM ARCHITECTURE</div>
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
+                    <p style={{ color: 'var(--text2)', fontSize: 13, lineHeight: 1.7, marginBottom: 14 }}>{buildPlan.architecture.overview}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                      {(buildPlan.architecture.components || []).map((comp, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', background: '#0f172a', borderRadius: 8, padding: '8px 12px' }}>
+                          <span style={{ color: '#a855f7', fontWeight: 800, fontSize: 12 }}>→</span>
+                          <div>
+                            <div style={{ color: 'var(--text)', fontSize: 12, fontWeight: 700 }}>{comp.name}</div>
+                            <div style={{ color: 'var(--text3)', fontSize: 11 }}>{comp.role}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 2-Week Roadmap */}
+              {buildPlan.roadmap?.length > 0 && (
+                <div>
+                  <div style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>🗓️ 2-WEEK BUILD ROADMAP</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {buildPlan.roadmap.map((phase, i) => {
+                      const phaseColors = ['#7c3aed', '#3b82f6', '#22c55e', '#f59e0b']
+                      const pc = phaseColors[i % phaseColors.length]
+                      return (
+                        <div key={i} style={{
+                          background: 'var(--surface)', border: `1px solid ${pc}33`,
+                          borderTop: `3px solid ${pc}`, borderRadius: 10, padding: 14
+                        }}>
+                          <div style={{ color: pc, fontSize: 11, fontWeight: 800, marginBottom: 6 }}>WEEK {phase.week} · {phase.days}</div>
+                          <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{phase.phase}</div>
+                          {(phase.tasks || []).map((task, ti) => (
+                            <div key={ti} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                              <span style={{ color: pc, fontSize: 11, fontWeight: 700, minWidth: 14 }}>✓</span>
+                              <span style={{ color: 'var(--text2)', fontSize: 12 }}>{task}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+            </div>
           </div>
         )}
 
