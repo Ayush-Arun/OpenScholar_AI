@@ -7,9 +7,7 @@
 
 const axios = require("axios");
 const xml2js = require("xml2js");
-const OpenAI = require("openai");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ARXIV_BASE = "http://export.arxiv.org/api/query";
 
 // ── In-memory cache: key=normalizedQuery, value={ papers, ts } ─────────────
@@ -266,7 +264,11 @@ async function fetchPapersFromQuery(userQuery, maxResults = 15) {
   }
 }
 
-// ── RAG answer generation using web-fetched papers ────────────────────────────
+const { generateAIResponse } = require("./aiRouter");
+
+/**
+ * RAG answer generation using web-fetched papers
+ */
 async function generateRAGAnswerFromWeb(question, papers) {
   const topPapers = papers.slice(0, 6);
   const contextText = topPapers.map((p, i) => `
@@ -299,16 +301,13 @@ Return your answer in this structure (Markdown):
 
 If context is insufficient, say so honestly.`;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: "You are a helpful AI research assistant." },
-      { role: "user", content: prompt }
-    ],
-    max_tokens: 1200
-  });
-
-  return response.choices[0]?.message?.content || "I could not generate an answer.";
+  try {
+    const answer = await generateAIResponse(prompt, { system: "You are a helpful AI research assistant." });
+    return answer || "I could not generate an answer.";
+  } catch (err) {
+    console.error("[WebSearch] RAG generation failed:", err.message);
+    return "I could not generate an answer.";
+  }
 }
 
 // ── Keyword similarity (for local RAG scoring) ────────────────────────────────

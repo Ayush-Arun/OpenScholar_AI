@@ -1,12 +1,8 @@
-// ============================================
-// IMAGE RESEARCH SERVICE - Snap2Research
-// Analyzes an image with OpenAI Vision, then
-// fetches related AI/GenAI papers from arXiv.
-// ============================================
-
-const OpenAI = require("openai");
 const axios = require("axios");
 const xml2js = require("xml2js");
+const { buildArxivQuery, rerankPapers } = require("./webSearchService");
+const { generateAIResponse } = require("../services/aiRouter");
+const OpenAI = require("openai");
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -33,33 +29,38 @@ Rules:
 - relevanceScore: 0-100. Set < 30 for abstract art, selfies, memes, blank pages, or random photos with no research context.
 - Focus on topics useful for AI/ML/GenAI research papers.`;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: systemPrompt
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${mimeType};base64,${base64Image}`,
-              detail: "high"
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: systemPrompt
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mimeType};base64,${base64Image}`,
+                detail: "high"
+              }
             }
-          }
-        ]
-      }
-    ],
-    max_tokens: 1200
-  });
+          ]
+        }
+      ],
+      max_tokens: 1200
+    });
 
-  const raw = response.choices[0]?.message?.content || "{}";
-  const cleaned = raw.replace(/```json|```/g, "").trim();
-  return JSON.parse(cleaned);
+    const raw = response.choices[0]?.message?.content || "{}";
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.error("[Snap2Research] Vision analysis failed:", err.message);
+    throw err;
+  }
 }
 
 // ── Step 2: Search arXiv with extracted queries ───────────────────────────────
@@ -73,10 +74,13 @@ async function searchArxivForQueries(queries = [], maxResultsTotal = 10) {
 
   for (const query of topQueries) {
     try {
+      // Use the stricter cascading query builder from webSearchService
+      const searchQuery = buildArxivQuery(query);
+      
       const params = {
-        search_query: `all:${query}`,
+        search_query: searchQuery,
         start: 0,
-        max_results: Math.ceil(maxResultsTotal / topQueries.length) + 2,
+        max_results: Math.ceil(maxResultsTotal / topQueries.length) + 5, // Fetch extra for reranking
         sortBy: "relevance",
         sortOrder: "descending"
       };
@@ -120,7 +124,79 @@ async function searchArxivForQueries(queries = [], maxResultsTotal = 10) {
     }
   }
 
-  return allPapers.slice(0, maxResultsTotal);
+  return allPapers;
+}
+
+// ── Step 3: Generate Full Project Build Plan ───────────────────────────────────
+
+async function generateBuildPlan(imageAnalysis, papers = []) {
+  console.log("[Snap2Research] Generating build plan...");
+
+  const paperContext = papers.slice(0, 4).map((p, i) => 
+    `Paper ${i+1}: ${p.title}\nAbstract: ${p.abstract.slice(0, 300)}...`
+  ).join("\n\n");
+
+  const prompt = `You are a project architect. Based on the following research image analysis and related papers, generate a COMPREHENSIVE project blueprint for a buildable AI application.
+
+IMAGE ANALYSIS:
+Problem: ${imageAnalysis.mainProblem}
+Keywords: ${imageAnalysis.researchKeywords.join(", ")}
+Domains: ${imageAnalysis.possibleDomains.join(", ")}
+
+RESEARCH CONTEXT:
+${paperContext}
+
+Return JSON only:
+{
+  "projectTitle": "Catchy name",
+  "tagline": "Tweet length hook",
+  "difficultyLevel": "Beginner | Intermediate | Advanced",
+  "estimatedTime": "2-4 weeks",
+  "problemStatement": "2-3 sentences explaining the core issue",
+  "proposedSolution": "How it uses AI specifically",
+  "uniqueAngle": "What makes it special",
+  "coreFeatures": [
+    {"feature": "Feature name", "description": "Details", "priority": "Must-have | Nice-to-have"}
+  ],
+  "techStack": {
+    "frontend": ["React", "Tailwind"],
+    "backend": ["Node/Express", "Python"],
+    "ai_ml": ["OpenAI", "PyTorch"],
+    "database": ["Pinecone", "Supabase"]
+  },
+  "datasetsAndAPIs": [
+    {"name": "Name", "purpose": "Why use it", "url": "Link if any"}
+  ],
+  "architecture": {
+    "overview": "High level flow",
+    "components": [
+      {"name": "Comp Name", "role": "What it does"}
+    ]
+  },
+  "roadmap": [
+    {
+      "week": 1,
+      "days": "Day 1-7",
+      "phase": "Foundation",
+      "tasks": ["Task 1", "Task 2"]
+    },
+    {
+      "week": 2,
+      "days": "Day 8-14",
+      "phase": "Deployment",
+      "tasks": ["Task 3", "Task 4"]
+    }
+  ],
+  "successMetrics": ["Metric 1"]
+}
+Rules:
+- Be specific, not generic. 
+- Use the tech stack mentioned in the context (React/Node) unless a different one is better for AI (e.g. Python for ML parts).
+- Ensure the roadmap covers all 14 days.`;
+
+  const content = await generateAIResponse(prompt, { useJson: true });
+  const cleaned = content.replace(/```json|```/g, "").trim();
+  return JSON.parse(cleaned);
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -170,9 +246,13 @@ async function analyzeImageAndFetchPapers(base64Image, mimeType) {
 
   // 3. Fetch papers from arXiv
   console.log("[Snap2Research] Fetching papers from arXiv...");
-  const papers = await searchArxivForQueries(queriesToUse, 10);
+  const rawPapers = await searchArxivForQueries(queriesToUse, 15);
 
-  console.log(`[Snap2Research] Returned ${papers.length} papers.`);
+  // 4. Rerank for maximum relevance using the aggregate of queries and problem
+  const aggregateQuery = `${mainProblem} ${researchKeywords.join(" ")}`;
+  const papers = rerankPapers(rawPapers, aggregateQuery, 1).slice(0, 10);
+
+  console.log(`[Snap2Research] Returned ${papers.length} relevant papers.`);
 
   return {
     imageAnalysis: {
@@ -188,4 +268,4 @@ async function analyzeImageAndFetchPapers(base64Image, mimeType) {
   };
 }
 
-module.exports = { analyzeImageAndFetchPapers };
+module.exports = { analyzeImageAndFetchPapers, generateBuildPlan };

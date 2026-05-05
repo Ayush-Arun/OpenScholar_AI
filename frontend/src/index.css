@@ -1,60 +1,149 @@
 :root {
-  --bg: #080810;
-  --bg2: #0d0d1a;
-  --surface: #111120;
-  --surface2: #16162a;
-  --border: #1e1e35;
-  --border2: #2a2a45;
-  --accent: #7c3aed;
-  --accent2: #a855f7;
-  --accent3: #c084fc;
-  --green: #22c55e;
-  --amber: #f59e0b;
-  --red: #ef4444;
-  --blue: #3b82f6;
-  --text: #f1f5f9;
-  --text2: #94a3b8;
-  --text3: #475569;
-  --font: 'Outfit', sans-serif;
-  --mono: 'Space Mono', monospace;
-  --radius: 12px;
-  --glow: 0 0 20px #7c3aed33;
+  /* Colors */
+  --bg: #F8F9FD;
+  --sidebar-bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --primary: #2819BB;
+  --primary-hover: #1E1296;
+  --primary-light: #E9E7FF;
+  --accent: #6366F1;
+  --border: #E5E7EB;
+  --text: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #3B82F6;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+
+  /* Dimensions & Shapes */
+  --sidebar-width: 260px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font);
-  line-height: 1.6;
+  font-family: var(--font-sans);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+}
 
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(16px); }
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
-@keyframes spin {
-  to { transform: rotate(360deg); }
+
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+.animate-slide-up { animation: slideUp 0.4s ease-out both; }
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 8px #7c3aed44; }
-  50% { box-shadow: 0 0 24px #7c3aed88; }
+::-webkit-scrollbar-track {
+  background: transparent;
 }
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
-.animate-fade-up { animation: fadeUp 0.5s ease both; }
-.animate-pulse { animation: pulse 2s ease infinite; }
+/* Utilities */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-light);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: white !important;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-outline {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.btn-outline:hover {
+  background: var(--bg);
+  border-color: var(--text-muted);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.tab-content {
+  animation: slideUp 0.4s ease-out both;
+}
+
+/* Scrollable main area */
+main {
+  overflow-y: auto;
+}

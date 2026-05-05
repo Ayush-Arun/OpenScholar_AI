@@ -4,9 +4,7 @@
 // analyzed papers & repos using Claude API
 // ============================================
 
-const OpenAI = require("openai");
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { generateAIResponse } = require("../services/aiRouter");
 
 // ── Generate Project Ideas ────────────────────────────────────────────────────
 
@@ -62,14 +60,8 @@ Return ONLY valid JSON array (no markdown, no explanation):
 
 Make all 5 ideas distinct. Prioritize ideas that are innovative, practical, and have a clear MVP path.`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     const ideas = JSON.parse(cleaned);
 
     console.log(`[IdeasAgent] Generated ${ideas.length} project ideas`);
@@ -127,14 +119,8 @@ Return ONLY valid JSON (no markdown):
   "winningFeature": "The one feature that would make judges love this"
 }`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     return JSON.parse(cleaned);
   } catch (err) {
     console.error("[IdeasAgent] Error validating idea:", err.message);

@@ -1,9 +1,5 @@
-const Anthropic = require("@anthropic-ai/sdk");
+const { generateAIResponse } = require("./aiRouter");
 const { fetchPapersFromQuery, generateRAGAnswerFromWeb, calculateSimilarity } = require("./webSearchService");
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "your_key_here"
-});
 
 // LOCAL RAG threshold — if best local paper scores below this, go to the web
 const LOCAL_RELEVANCE_THRESHOLD = 2;
@@ -105,12 +101,7 @@ Return your answer in the following structure exactly (using Markdown):
 If the context is insufficient to answer the question, say so honestly.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 1000,
-      system: "You are a helpful AI research assistant.",
-      messages: [{ role: "user", content: prompt }]
-    });
+    const answer = await generateAIResponse(prompt, { system: "You are a helpful AI research assistant." });
 
     const sources = topDocs.map(p => ({
       title: p.title,
@@ -121,29 +112,13 @@ If the context is insufficient to answer the question, say so honestly.`;
 
     return {
       source: "local",
-      answer: response.content[0].text,
+      answer,
       sources,
       fetchedPapers: []
     };
   } catch (err) {
-    console.error("[Claude RAG] Error:", err.message);
-    // Fallback to OpenAI if Claude fails
-    try {
-      const answer = await generateRAGAnswerFromWeb(question, topDocs);
-      return {
-        source: "local",
-        answer,
-        sources: topDocs.map(p => ({
-          title: p.title,
-          authors: p.authors?.join(", "),
-          url: p.arxivUrl || p.pdfUrl,
-          relevanceReason: "Matched keywords from your query."
-        })),
-        fetchedPapers: []
-      };
-    } catch (e) {
-      throw new Error("Failed to generate research chat response.");
-    }
+    console.error("[ChatRAG] AI Error:", err.message);
+    throw new Error("Failed to generate research chat response.");
   }
 }
 
@@ -179,19 +154,14 @@ Return ONLY valid JSON in this exact structure:
 Note: Since we don't have historical data, mark direction as "stable" or "up" based on your intuition of the field.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const jsonMatch = response.content[0].text.match(/\{[\s\S]*\}/);
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
-    throw new Error("Failed to parse JSON from Claude");
+    throw new Error("Failed to parse JSON from AI response");
   } catch (err) {
-    console.error("[Claude Trends] Error:", err.message);
+    console.error("[Trends] AI Error:", err.message);
     throw new Error("Failed to generate trends analysis.");
   }
 }
@@ -226,15 +196,10 @@ Return your explanation in this exact structure using Markdown:
 Keep it clear, practical, and useful for students/developers.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 1200,
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    return { explanation: response.content[0].text };
+    const answer = await generateAIResponse(prompt);
+    return { explanation: answer };
   } catch (err) {
-    console.error("[Claude Explain] Error:", err.message);
+    console.error("[Explain] AI Error:", err.message);
     throw new Error("Failed to generate paper explanation.");
   }
 }
