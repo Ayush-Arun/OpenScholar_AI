@@ -4,7 +4,10 @@ const { buildArxivQuery, rerankPapers } = require("./webSearchService");
 const { generateAIResponse } = require("../services/aiRouter");
 const OpenAI = require("openai");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai = null;
+if (process.env.OPENAI_API_KEY) {
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 const ARXIV_BASE = "http://export.arxiv.org/api/query";
 
@@ -30,6 +33,9 @@ Rules:
 - Focus on topics useful for AI/ML/GenAI research papers.`;
 
   try {
+    if (!openai) {
+      throw new Error("OpenAI API key missing. Please set OPENAI_API_KEY in your .env file.");
+    }
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       response_format: { type: "json_object" },

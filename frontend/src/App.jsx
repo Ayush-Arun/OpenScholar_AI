@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LineChart, Line, AreaChart, Area } from 'recharts'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip, Cell, AreaChart, Area
+} from 'recharts'
 
 // ── API Helper ────────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+
 const api = async (path, opts = {}) => {
   try {
-    console.log(`[API] ${opts.method || 'GET'} ${path}`);
-    const r = await fetch(`${API}${path}`, {
+    const r = await fetch(`${API_URL}${path}`, {
       headers: { 'Content-Type': 'application/json' },
       ...opts
     })
@@ -15,58 +18,24 @@ const api = async (path, opts = {}) => {
       return { error: errData.error || `HTTP ${r.status}` };
     }
     return await r.json()
-  } catch (err) { return null; }
-}
-
-// ── Label Config ──────────────────────────────────────────────────────────────
-const LABELS = {
-  'Should Build': { color: '#2a14b4', bg: '#eef2ff', border: '#c7d2fe', icon: 'bolt' },
-  'Should Learn': { color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: 'menu_book' },
-  'Should Watch': { color: '#d97706', bg: '#fffbeb', border: '#fde68a', icon: 'visibility' },
-  'Should Ignore': { color: '#64748b', bg: '#f8fafc', border: '#e2e8f0', icon: 'close' },
+  } catch (err) {
+    console.error(`[API Error] ${path}:`, err);
+    return { error: "Network error or server unreachable" };
+  }
 }
 
 // ── Shared UI Components ──────────────────────────────────────────────────────
 
-function ScoreBar({ value = 0, color = 'var(--primary)' }) {
-  return (
-    <div style={{ background: '#f1f5f9', borderRadius: '10px', height: 6, width: '100%', overflow: 'hidden' }}>
-      <div style={{
-        background: color,
-        height: '100%',
-        width: `${Math.min(100, value)}%`,
-        transition: 'width 1s ease',
-      }} />
-    </div>
-  )
-}
-
-const StatCard = ({ label, value, sub, color = 'var(--primary)' }) => (
-  <div className="card" style={{ padding: 20, flex: 1, minWidth: 200 }}>
-    <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>{label}</div>
-    <div style={{ fontSize: 32, fontWeight: 800, color: color, marginBottom: 4 }}>{value}</div>
-    {sub && <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>{sub}</div>}
-  </div>
-)
-
-const ScoreBar = ({ value = 0, color = 'var(--primary)' }) => (
-  <div style={{ background: '#F3F4F6', borderRadius: 99, height: 5, width: '100%', overflow: 'hidden' }}>
-    <div style={{ background: color, height: '100%', width: `${Math.min(100, value)}%`, borderRadius: 99, transition: 'width 1s ease' }} />
-  </div>
-)
-
-const PageHeader = ({ title, description, actions }) => (
-  <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-    <div><h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>{title}</h1><p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{description}</p></div>
-    <div style={{ display: 'flex', gap: 12 }}>{actions}</div>
-  </div>
-)
-
-// ── Feature Cards ─────────────────────────────────────────────────────────────
-
-const PaperCard = ({ paper, index }) => {
-  const [expanded, setExpanded] = useState(false); const [explainMode, setExplainMode] = useState('beginner'); const [explanation, setExplanation] = useState(null); const [isExplaining, setIsExplaining] = useState(false)
-  const handleExplain = async () => { setExpanded(true); if (!explanation) { setIsExplaining(true); const r = await api(`/papers/${index}/explain`, { method: 'POST', body: JSON.stringify({ mode: explainMode }) }); if (r?.explanation) setExplanation({ text: r.explanation }); setIsExplaining(false) } }
+const LabelBadge = ({ label }) => {
+  const configs = {
+    'Should Build': { color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: 'bolt' },
+    'Should Learn': { color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', icon: 'menu_book' },
+    'Should Watch': { color: '#d97706', bg: '#fffbeb', border: '#fde68a', icon: 'visibility' },
+    'Should Ignore': { color: '#64748b', bg: '#f8fafc', border: '#e2e8f0', icon: 'close' },
+    'BUILD': { color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: 'auto_awesome' },
+    'RESEARCH': { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', icon: 'science' }
+  }
+  const cfg = configs[label] || configs['Should Watch']
   return (
     <span style={{
       background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
@@ -80,27 +49,30 @@ const PaperCard = ({ paper, index }) => {
   )
 }
 
-function StatCard({ label, value, sub, color = 'var(--primary)', icon, trend }) {
-  return (
-    <div className="premium-card" style={{ padding: 24, flex: 1, minWidth: 200 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <div style={{ padding: 8, background: `${color}10`, color, borderRadius: '8px' }}>
-          <span className="material-symbols-outlined">{icon}</span>
-        </div>
-        {trend && (
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: 2 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>trending_up</span> {trend}
-          </span>
-        )}
+const ScoreBar = ({ value = 0, color = 'var(--primary)' }) => (
+  <div style={{ background: '#f1f5f9', borderRadius: 99, height: 5, width: '100%', overflow: 'hidden' }}>
+    <div style={{ background: color, height: '100%', width: `${Math.min(100, value)}%`, borderRadius: 99, transition: 'width 1s ease' }} />
+  </div>
+)
+
+const StatCard = ({ label, value, trend, color, icon }) => (
+  <div className="premium-card" style={{ padding: 24, flex: 1, minWidth: 200 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+      <div style={{ padding: 8, background: `${color}15`, color, borderRadius: '8px' }}>
+        <span className="material-symbols-outlined">{icon}</span>
       </div>
-      <div style={{ color: 'var(--on-surface-variant)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--on-surface)' }}>{value}</div>
-      <div style={{ marginTop: 16, height: 4, background: '#f1f5f9', borderRadius: 'full', overflow: 'hidden' }}>
-        <div style={{ width: '70%', height: '100%', background: color }} />
-      </div>
+      {trend && (
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>trending_up</span> {trend}
+        </span>
+      )}
     </div>
-  )
-}
+    <div style={{ color: 'var(--on-surface-variant)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
+    <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--on-surface)' }}>{value}</div>
+  </div>
+)
+
+// ── Feature Cards ─────────────────────────────────────────────────────────────
 
 function PaperCard({ paper, index }) {
   const [expanded, setExpanded] = useState(false)
@@ -112,7 +84,10 @@ function PaperCard({ paper, index }) {
     setExpanded(true)
     if (!explanation || explanation.mode !== explainMode) {
       setIsExplaining(true)
-      const r = await api(`/papers/${index}/explain`, { method: 'POST', body: JSON.stringify({ mode: explainMode }) })
+      const r = await api(`/papers/${paper.id || index}/explain`, { 
+        method: 'POST', 
+        body: JSON.stringify({ mode: explainMode }) 
+      })
       if (r?.explanation) setExplanation({ mode: explainMode, text: r.explanation })
       setIsExplaining(false)
     }
@@ -132,9 +107,9 @@ function PaperCard({ paper, index }) {
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
             <span style={{ background: '#f1f5f9', color: 'var(--on-surface-variant)', fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
-              Node #{index + 1} // {paper.researchArea || 'AI'}
+              {paper.researchArea || 'General AI'}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 600 }}>Complexity: {paper.complexity || 'Institutional'}</span>
+            <span style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 600 }}>Complexity: {paper.complexity || 'Intermediate'}</span>
           </div>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)', lineHeight: 1.4, marginBottom: 8 }}>{paper.title}</h3>
           <p style={{ fontSize: 13, color: 'var(--on-surface-variant)', fontWeight: 500 }}>
@@ -148,30 +123,11 @@ function PaperCard({ paper, index }) {
             <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase' }}>Score</div>
           </div>
         </div>
-      </>
-    )}
-  </div>
-)
+      </div>
 
       <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.6, marginBottom: 20 }}>
-        {paper.tldr || paper.abstract?.slice(0, 180) + '...'}
+        {paper.tldr || (paper.abstract?.length > 180 ? paper.abstract.slice(0, 180) + '...' : paper.abstract)}
       </p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
-        {[
-          { label: 'Novelty', val: paper.noveltyScore, color: '#3b82f6' },
-          { label: 'Practical', val: paper.practicalityScore, color: '#10b981' },
-          { label: 'Accuracy', val: paper.overallScore, color: '#f59e0b' },
-        ].map(({ label, val, color }) => (
-          <div key={label}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--outline)' }}>{label}</span>
-              <span style={{ fontSize: 11, fontWeight: 800, color }}>{val || 50}</span>
-            </div>
-            <ScoreBar value={val} color={color} />
-          </div>
-        ))}
-      </div>
 
       {expanded && (
         <div className="animate-fade" style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: 24, marginTop: 8 }}>
@@ -224,14 +180,16 @@ function PaperCard({ paper, index }) {
       {expanded && explanation && (
         <div className="animate-fade" style={{ marginTop: 20, padding: 24, background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--outline-variant)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: '#2a14b4', textTransform: 'uppercase' }}>Neural Synthesis Result</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase' }}>Neural Synthesis Result</span>
             <select value={explainMode} onChange={(e) => setExplainMode(e.target.value)} style={{ background: 'white', border: '1px solid var(--outline-variant)', borderRadius: '6px', fontSize: 11, padding: '4px 8px' }}>
               <option value="beginner">Beginner</option>
               <option value="developer">Developer</option>
               <option value="researcher">Researcher</option>
             </select>
           </div>
-          <p style={{ fontSize: 14, color: 'var(--on-surface)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{explanation.text}</p>
+          <div style={{ fontSize: 14, color: 'var(--on-surface)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }} className="markdown-content">
+            {explanation.text}
+          </div>
         </div>
       )}
     </div>
@@ -247,13 +205,11 @@ function RepoCard({ repo, index }) {
   ]
   const colors = ['#3b82f6', '#10b981', '#f59e0b', '#6366f1']
 
-const AuthModal = ({ mode, setMode, onClose, onAuth }) => {
-  const [email, setEmail] = useState(''); const [pass, setPass] = useState(''); const [name, setName] = useState('')
   return (
     <div className="premium-card animate-fade" style={{ padding: 24, marginBottom: 16, animationDelay: `${index * 0.05}s` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ padding: 10, background: '#eff6ff', color: '#2a14b4', borderRadius: '12px' }}>
+          <div style={{ padding: 10, background: '#eff6ff', color: 'var(--primary)', borderRadius: '12px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: 24 }}>account_tree</span>
           </div>
           <div>
@@ -280,6 +236,20 @@ const AuthModal = ({ mode, setMode, onClose, onAuth }) => {
         </ResponsiveContainer>
       </div>
 
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: 'var(--on-surface-variant)', fontWeight: 600 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>star</span>
+          {repo.stars?.toLocaleString()}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--on-surface-variant)', fontWeight: 600 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4 }}>fork_right</span>
+          {repo.forks?.toLocaleString()}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700, marginLeft: 'auto' }}>
+          {repo.language}
+        </div>
+      </div>
+
       <a href={repo.url} target="_blank" rel="noreferrer" className="btn-secondary" style={{
         width: '100%', textAlign: 'center', textDecoration: 'none', display: 'block', padding: '10px 0'
       }}>View on GitHub →</a>
@@ -287,57 +257,96 @@ const AuthModal = ({ mode, setMode, onClose, onAuth }) => {
   )
 }
 
-const ProfileDropdown = ({ user, onLogout }) => {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="premium-card animate-fade" style={{ padding: '16px 20px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 16, animationDelay: `${index * 0.08}s` }}>
-      <div style={{ fontSize: 24, padding: 12, background: '#f8fafc', borderRadius: '12px' }}>{trend.emoji}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--on-surface)' }}>{trend.trend}</span>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)' }}>+{trend.momentum}%</span>
-        </div>
-        <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', marginBottom: 8 }}>{trend.description}</p>
-        <ScoreBar value={trend.momentum} color="var(--primary)" />
-      </div>
-    </div>
-  )
-}
-
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [user, setUser] = useState(null); const [authMode, setAuthMode] = useState(null)
-  const [digest, setDigest] = useState(null); const [status, setStatus] = useState(null); const [tab, setTab] = useState('overview'); const [isRunning, setIsRunning] = useState(false); const [notification, setNotification] = useState(null)
+  const [tab, setTab] = useState('overview')
+  const [digest, setDigest] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [isRunning, setIsRunning] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [notification, setNotification] = useState(null)
+
+  // Chat State
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([])
+  const [isChatting, setIsChatting] = useState(false)
   
-  const loadData = useCallback(async () => { const d = await api('/digest'); const s = await api('/status'); if (d && !d.error) setDigest(d); if (s && !s.error) setStatus(s) }, [])
-  useEffect(() => { loadData() }, [loadData])
-  useEffect(() => { const interval = setInterval(async () => { const s = await api('/status'); if (s && !s.error) { setStatus(s); if (!s.isRunning && isRunning) { setIsRunning(false); loadData(); setNotification({ msg: '✅ Sync complete!', type: 'success' }); setTimeout(() => setNotification(null), 4000) } } }, 3000); return () => clearInterval(interval) }, [isRunning, loadData])
+  // Validation State
+  const [validateInput, setValidateInput] = useState('')
+  const [isValidating, setIsValidating] = useState(false)
+  const [validateResult, setValidateResult] = useState(null)
+  
+  // Pitch State
+  const [loadingPitch, setLoadingPitch] = useState(null)
+  const [pitchModal, setPitchModal] = useState(null)
+
+  // Settings State
+  const [emailInput, setEmailInput] = useState('')
+  const [emailStatus, setEmailStatus] = useState(null)
+
+  // Trends State
+  const [liveTrends, setLiveTrends] = useState(null)
+  const [isLoadingTrends, setIsLoadingTrends] = useState(false)
+
+  // Snap2Research State
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
+  const [imageResearchData, setImageResearchData] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const notify = (msg, type = 'success') => {
+    setNotification({ msg, type })
+    setTimeout(() => setNotification(null), 4000)
+  }
+
+  const loadData = useCallback(async () => {
+    const d = await api('/digest')
+    if (d && !d.error) setDigest(d)
+    const s = await api('/status')
+    if (s && !s.error) setStatus(s)
+  }, [])
 
   useEffect(() => {
-    if (tab === 'trends' && !liveTrends && !isLoadingTrends && digest?.papers?.length > 0) {
-      setIsLoadingTrends(true)
-      api('/trends').then(r => {
-        setLiveTrends(r)
-        setIsLoadingTrends(false)
-      })
-    }
-  }, [tab, digest, liveTrends, isLoadingTrends])
+    loadData()
+  }, [loadData])
 
+  // Polling for pipeline status
   useEffect(() => {
     const interval = setInterval(async () => {
       const s = await api('/status')
-      if (s) {
+      if (s && !s.error) {
         setStatus(s)
         if (!s.isRunning && isRunning) {
           setIsRunning(false)
           loadData()
           notify('✅ Pipeline complete! Digest updated.')
+        } else if (s.isRunning && !isRunning) {
+          setIsRunning(true)
         }
       }
     }, 3000)
     return () => clearInterval(interval)
   }, [isRunning, loadData])
+
+  // Load trends if tab is active
+  useEffect(() => {
+    if (tab === 'trends' && !liveTrends && !isLoadingTrends && digest?.papers?.length > 0) {
+      setIsLoadingTrends(true)
+      api('/trends').then(r => {
+        if (r && !r.error) setLiveTrends(r)
+        setIsLoadingTrends(false)
+      })
+    }
+  }, [tab, digest, liveTrends, isLoadingTrends])
+
+  const triggerPipeline = async () => {
+    if (isRunning) return
+    setIsRunning(true)
+    notify('🚀 Pipeline started! Scouting papers & repos...', 'info')
+    await api('/pipeline/run', { method: 'POST', body: JSON.stringify({ skipEmail: true }) })
+  }
 
   const handleChat = async () => {
     if (!chatInput.trim() || isChatting) return
@@ -349,38 +358,9 @@ export default function App() {
     if (r?.answer) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: r.answer, sources: r.sources || [] }])
     } else {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error answering your question.', sources: [] }])
+      setChatMessages(prev => [...prev, { role: 'assistant', content: r.error || 'Sorry, I encountered an error.', sources: [] }])
     }
     setIsChatting(false)
-  }
-
-  const triggerPipeline = async () => {
-    if (isRunning) return
-    setIsRunning(true)
-    notify('🚀 Pipeline started! Scouting papers & repos...', 'info')
-    // Set skipEmail to true so it doesn't automatically send the email
-    await api('/pipeline/run', { method: 'POST', body: JSON.stringify({ skipEmail: true }) })
-  }
-
-  const sendDigestEmail = async () => {
-    if (isSendingEmail || !digest) return
-    setIsSendingEmail(true)
-    notify('📧 Sending digest to recipients...', 'info')
-    const r = await api('/email/send', { method: 'POST', body: JSON.stringify({}) })
-    if (r && !r.error && r.success !== false) {
-      notify('✅ Digest emailed successfully!')
-    } else {
-      notify(`❌ Error sending email: ${r?.error || 'Unknown error'}`, 'error')
-    }
-    setIsSendingEmail(false)
-  }
-
-  const sendEmail = async () => {
-    if (!emailInput) return
-    setEmailStatus('sending')
-    const r = await api('/email/test', { method: 'POST', body: JSON.stringify({ email: emailInput }) })
-    setEmailStatus(r?.success ? 'sent' : 'error')
-    notify(r?.success ? '✅ Test email sent!' : `❌ Error: ${r?.error}`, r?.success ? 'success' : 'error')
   }
 
   const handleValidateIdea = async () => {
@@ -388,7 +368,8 @@ export default function App() {
     setIsValidating(true)
     setValidateResult(null)
     const r = await api('/validate', { method: 'POST', body: JSON.stringify({ idea: validateInput }) })
-    setValidateResult(r)
+    if (r && !r.error) setValidateResult(r)
+    else notify(`❌ Error: ${r?.error || 'Validation failed'}`, 'error')
     setIsValidating(false)
   }
 
@@ -396,38 +377,71 @@ export default function App() {
     setLoadingPitch(index)
     const r = await api(`/ideas/${index}/pitch`, { method: 'POST' })
     if (r?.pitch) {
-      setPitchModal({ index, pitch: r.pitch, ideaName: ideas[index]?.name })
+      setPitchModal({ index, pitch: r.pitch, ideaName: (digest?.buildIdeas || [])[index]?.name })
     } else {
       notify('❌ Failed to generate pitch. Try again.', 'error')
     }
     setLoadingPitch(null)
   }
 
-  const papers = digest?.papers || []
-  const repos = digest?.repos || []
-  const trends = digest?.trends || {}
-  const stats = digest?.stats || {}
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    
+    setSelectedImage(URL.createObjectURL(file))
+    setIsAnalyzingImage(true)
+    setImageResearchData(null)
+    setTab('snap') // Switch to Snap tab
 
-  const filteredPapers = papers.filter(p => {
+    const formData = new FormData()
+    formData.append('image', file)
+
+    try {
+      const r = await fetch(`${API_URL}/image-research`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await r.json()
+      if (data.success) {
+        setImageResearchData(data)
+        notify('✅ Image analyzed! Research nodes found.')
+      } else {
+        notify(`❌ ${data.error || 'Analysis failed'}`, 'error')
+      }
+    } catch (err) {
+      notify('❌ Network error during analysis', 'error')
+    } finally {
+      setIsAnalyzingImage(false)
+    }
+  }
+
+  const sendTestEmail = async () => {
+    if (!emailInput) return
+    setEmailStatus('sending')
+    const r = await api('/email/test', { method: 'POST', body: JSON.stringify({ email: emailInput }) })
+    setEmailStatus(r?.success ? 'sent' : 'error')
+    notify(r?.success ? '✅ Test email sent!' : `❌ Error: ${r?.error}`, r?.success ? 'success' : 'error')
+  }
+
+  const filteredPapers = (digest?.papers || []).filter(p => {
     const matchSearch = !search || p.title?.toLowerCase().includes(search.toLowerCase())
     const matchFilter = filter === 'all' || p.actionLabel === filter
     return matchSearch && matchFilter
   })
 
-  const filteredRepos = repos.filter(r => {
+  const filteredRepos = (digest?.repos || []).filter(r => {
     const matchSearch = !search || r.name?.toLowerCase().includes(search.toLowerCase())
     const matchFilter = filter === 'all' || r.usabilityLabel === filter
     return matchSearch && matchFilter
   })
 
-  const ideas = digest?.buildIdeas || []
-
   const TABS = [
-    { id: 'overview', label: 'Overview', icon: 'dashboard' },
+    { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
     { id: 'papers', label: 'Research Library', icon: 'menu_book' },
     { id: 'repos', label: 'Codebase Audit', icon: 'biotech' },
     { id: 'trends', label: 'Trend Radar', icon: 'radar' },
     { id: 'chat', label: 'Research Console', icon: 'terminal' },
+    { id: 'ideas', label: 'Hypothesis Module', icon: 'psychology' },
     { id: 'settings', label: 'System Settings', icon: 'settings' },
   ]
 
@@ -436,16 +450,16 @@ export default function App() {
 
       {/* Side Nav */}
       <aside style={{
-        width: 'var(--sidebar-width)', background: '#f8fafc', borderRight: '1px solid var(--outline-variant)',
-        position: 'fixed', top: 0, bottom: 0, left: 0, display: 'flex', flexDirection: 'column', padding: '24px 16px'
+        width: 'var(--sidebar-width)', background: 'white', borderRight: '1px solid var(--outline-variant)',
+        position: 'fixed', top: 0, bottom: 0, left: 0, display: 'flex', flexDirection: 'column', padding: '24px 16px', zIndex: 100
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 40, padding: '0 8px' }}>
-          <div style={{ width: 36, height: 36, background: 'var(--primary)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+          <div style={{ width: 36, height: 36, background: 'var(--primary)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
             <span className="material-symbols-outlined">science</span>
           </div>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--on-surface)', letterSpacing: '-0.02em' }}>Research Console</div>
-            <div style={{ fontSize: 10, color: 'var(--outline)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Institutional Access</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--on-surface)', letterSpacing: '-0.02em' }}>OpenScholar <span style={{color: 'var(--primary)'}}>AI</span></div>
+            <div style={{ fontSize: 10, color: 'var(--outline)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>v4.2 Stable</div>
           </div>
         </div>
 
@@ -453,51 +467,53 @@ export default function App() {
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} className={`sidebar-link ${tab === t.id ? 'active' : ''}`} style={{ border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
               <span className="material-symbols-outlined" style={{ fontSize: 20 }}>{t.icon}</span>
-              <span>{t.label}</span>
+              <span style={{ fontSize: 14 }}>{t.label}</span>
             </button>
           ))}
+          {imageResearchData && (
+            <button onClick={() => setTab('snap')} className={`sidebar-link ${tab === 'snap' ? 'active' : ''}`} style={{ border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', width: '100%', marginTop: 20 }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--primary)' }}>camera</span>
+              <span style={{ fontSize: 14 }}>Snap Result</span>
+            </button>
+          )}
         </nav>
 
         <div style={{ marginTop: 'auto', padding: '16px 8px' }}>
-          <button onClick={() => setTab('chat')} className="btn-primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-            New Analysis
+          <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" style={{ display: 'none' }} />
+          <button onClick={() => fileInputRef.current.click()} className="btn-primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>photo_camera</span>
+            Snap2Research
           </button>
         </div>
       </aside>
 
       <div style={{ flex: 1, marginLeft: 'var(--sidebar-width)', display: 'flex', flexDirection: 'column' }}>
-        {/* Top Nav */}
+        
+        {/* Top Header */}
         <header style={{
           height: 'var(--header-height)', background: 'rgba(255, 255, 255, 0.8)', backdropFilter: 'blur(12px)',
           borderBottom: '1px solid var(--outline-variant)', position: 'sticky', top: 0, zIndex: 50,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--on-surface)' }}>OpenScholar <span style={{ color: 'var(--primary)' }}>AI</span></div>
-            <nav style={{ display: 'flex', gap: 24 }}>
-              {['Overview', 'Research', 'Analytics'].map(n => (
-                <button key={n} style={{ background: 'none', border: 'none', color: n === 'Overview' ? 'var(--primary)' : 'var(--on-surface-variant)', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>{n}</button>
-              ))}
-            </nav>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface-variant)' }}>
+            System Status: <span style={{ color: isRunning ? 'var(--info)' : 'var(--success)' }}>{isRunning ? 'PIPELINE_EXECUTING' : 'IDLE_READY'}</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <div style={{ position: 'relative' }}>
               <span className="material-symbols-outlined" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 18, color: 'var(--outline)' }}>search</span>
-              <input type="text" placeholder="Search research library..." style={{
-                background: '#f1f5f9', border: '1px solid var(--outline-variant)', borderRadius: '100px', padding: '8px 16px 8px 40px',
-                fontSize: 13, width: 260, outline: 'none'
-              }} />
+              <input 
+                type="text" 
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Global search..." 
+                style={{
+                  background: '#f1f5f9', border: '1px solid var(--outline-variant)', borderRadius: '100px', padding: '8px 16px 8px 40px',
+                  fontSize: 13, width: 240, outline: 'none'
+                }} 
+              />
             </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              {['notifications', 'help_outline'].map(i => (
-                <button key={i} style={{ background: 'none', border: 'none', color: 'var(--on-surface-variant)', cursor: 'pointer' }}>
-                  <span className="material-symbols-outlined">{i}</span>
-                </button>
-              ))}
-            </div>
-            <div style={{ width: 32, height: 32, borderRadius: 'full', background: '#e2e8f0', border: '1px solid var(--outline-variant)', overflow: 'hidden' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#e2e8f0', border: '1px solid var(--outline-variant)', overflow: 'hidden' }}>
               <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
             </div>
           </div>
@@ -506,318 +522,220 @@ export default function App() {
         {notification && (
           <div className="animate-fade" style={{
             position: 'fixed', bottom: 32, right: 32, zIndex: 1000,
-            background: notification.type === 'error' ? '#fee2e2' : '#ecfdf5',
-            color: notification.type === 'error' ? '#b91c1c' : '#047857',
-            border: `1px solid ${notification.type === 'error' ? '#fecaca' : '#a7f3d0'}`,
-            padding: '12px 24px', borderRadius: '8px', fontWeight: 600, fontSize: 14,
-            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
+            background: notification.type === 'error' ? '#fee2e2' : notification.type === 'info' ? '#eff6ff' : '#ecfdf5',
+            color: notification.type === 'error' ? '#b91c1c' : notification.type === 'info' ? '#2563eb' : '#047857',
+            border: '1px solid currentColor',
+            padding: '12px 24px', borderRadius: '12px', fontWeight: 600, fontSize: 14,
+            boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', gap: 10
           }}>
+            <span className="material-symbols-outlined" style={{fontSize: 20}}>{notification.type === 'error' ? 'error' : notification.type === 'info' ? 'info' : 'check_circle'}</span>
             {notification.msg}
           </div>
         )}
 
-        {/* Content */}
-      <main style={{ flex: 1, padding: 24, maxWidth: 1200, margin: '0 auto', width: '100%' }}>
+        <main style={{ flex: 1, padding: 32, maxWidth: 1200, width: '100%', margin: '0 auto' }}>
 
-        {/* ── Overview Tab ── */}
-        {tab === 'overview' && (
-          <div className="animate-fade">
-            {/* Hero Section: Initialize Research Engine */}
-            <section className="premium-card" style={{
-              background: 'white', padding: '48px 64px', display: 'flex', alignItems: 'center', gap: 48, marginBottom: 32, overflow: 'hidden', position: 'relative'
-            }}>
-              <div style={{ flex: 1, zIndex: 10 }}>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#eff6ff', color: 'var(--primary)', borderRadius: '20px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 24 }}>
-                  <span style={{ width: 8, height: 8, background: 'var(--primary)', borderRadius: '50%', animation: 'pulse 1.5s infinite' }}></span>
-                  Neural Engine Active
-                </div>
-                <h1 style={{ fontSize: 42, fontWeight: 800, color: 'var(--on-surface)', lineHeight: 1.1, marginBottom: 20, letterSpacing: '-0.02em' }}>
-                  Scale your discovery with <span style={{ color: 'var(--primary)' }}>OpenScholar AI</span>.
-                </h1>
-                <p style={{ fontSize: 16, color: 'var(--on-surface-variant)', marginBottom: 32, lineHeight: 1.6, maxWidth: 540 }}>
-                  Synthesize multi-modal research repositories, perform automated technical audits, and generate peer-reviewed level insights with our latest LLM architecture.
-                </p>
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <button onClick={triggerPipeline} disabled={isRunning} className="btn-primary" style={{ padding: '14px 28px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {isRunning ? 'Executing...' : 'Initialize Research Engine'}
-                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>bolt</span>
-                  </button>
-                  <button className="btn-secondary" style={{ padding: '14px 28px' }}>View Documentation</button>
-                </div>
-              </div>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <div className="premium-card" style={{ borderRadius: '12px', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.05)' }}>
-                  <img src="https://lh3.googleusercontent.com/aida/ADBb0uh1t5x9P5A1EM_tYxqbz6__MKLCJmgrcjSQ6SNQUAiI6rIrvhzYuHSCxNi3h335XpvH0dwFp7U4IdGIZxu0uIk6eRM-xYT6tNCsNbMd6gdoeiW_rIXiQH74366oYSCBbdXyLeNYSZcMh3-B8IEDkWW6ZlOvIktEFmf4hAAPQ5U-ZaiPNBYVwahq1CeUzP9Y1P9-fxF8nXMmd1kzvQUBtd9hjbqlCsBr42bs25DhW1UJltQPcj7DGcnEeCZhc6bgWhwpUKbZcJvh7LU" alt="Neural Trace" style={{ width: '100%', height: 'auto', display: 'block' }} />
-                </div>
-              </div>
-            </section>
-
-            {/* Metrics Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 24, marginBottom: 32 }}>
-              <StatCard label="Papers Analyzed" value={(stats.papersAnalyzed || 0).toLocaleString()} trend="+12%" color="#3b82f6" icon="library_books" />
-              <StatCard label="Repos Audited" value={(stats.reposAnalyzed || 0).toLocaleString()} trend="+8%" color="#6366f1" icon="code" />
-              <StatCard label="Inference Accuracy" value="99.98%" color="#10b981" icon="verified" />
-              <StatCard label="Global Latency" value="14.2ms" color="#f59e0b" icon="speed" />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 32 }}>
-              {/* Top Papers Section */}
-              <section>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)' }}>Top Research Nodes</h2>
-                  <button onClick={() => setTab('papers')} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    View All <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_forward</span>
-                  </button>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {papers.slice(0, 3).map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
+          {/* ── Overview Tab ── */}
+          {tab === 'overview' && (
+            <div className="animate-fade">
+              <section className="premium-card" style={{
+                background: 'linear-gradient(135deg, white, #f8faff)', padding: '48px', display: 'flex', alignItems: 'center', gap: 48, marginBottom: 32, position: 'relative'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#eff6ff', color: 'var(--primary)', borderRadius: '20px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 24 }}>
+                    <span style={{ width: 8, height: 8, background: 'var(--primary)', borderRadius: '50%', animation: 'pulse 1.5s infinite' }}></span>
+                    Research Pipeline Ready
+                  </div>
+                  <h1 style={{ fontSize: 36, fontWeight: 800, color: 'var(--on-surface)', lineHeight: 1.2, marginBottom: 20 }}>
+                    Synthesize the cutting edge of <span style={{ color: 'var(--primary)' }}>AI Research</span>.
+                  </h1>
+                  <p style={{ fontSize: 16, color: 'var(--on-surface-variant)', marginBottom: 32, lineHeight: 1.6, maxWidth: 600 }}>
+                    Automated discovery, analysis, and build-plan generation for GenAI practitioners. Scout ArXiv and GitHub in one click.
+                  </p>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    <button onClick={triggerPipeline} disabled={isRunning} className="btn-primary" style={{ padding: '14px 28px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {isRunning ? 'Executing Pipeline...' : 'Initialize Pipeline'}
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>rocket_launch</span>
+                    </button>
+                    <button onClick={() => setTab('chat')} className="btn-secondary" style={{ padding: '14px 28px' }}>Open Research Console</button>
+                  </div>
                 </div>
               </section>
 
-              {/* Intelligence Feed */}
-              <section className="premium-card" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--outline-variant)' }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--on-surface)' }}>Recent Intelligence</h3>
-                  <p style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>Global breakthroughs in last 24h</p>
-                </div>
-                <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
-                  {[
-                    { topic: 'Quantum Computing', time: '2m ago', title: 'Superconductivity breakthrough in room-temp conditions', meta: 'Nature Rep.' },
-                    { topic: 'Oncology Research', time: '14m ago', title: 'Targeted T-Cell delivery via nano-particles', meta: 'Audit Pass' },
-                    { topic: 'Astrophysics', time: '1h ago', title: 'Anomalous radio signals from Proxima Centauri', meta: 'JWST Sync' },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 16 }}>
-                      <div style={{ width: 8, height: 8, background: i === 0 ? 'var(--primary)' : '#e2e8f0', borderRadius: '50%', marginTop: 6, flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--outline)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.topic}</span>
-                          <span style={{ fontSize: 10, color: 'var(--outline)' }}>{item.time}</span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 24, marginBottom: 32 }}>
+                <StatCard label="Papers Analyzed" value={digest?.stats?.papersAnalyzed || 0} trend="+12%" color="#3b82f6" icon="library_books" />
+                <StatCard label="Repos Audited" value={digest?.stats?.reposAnalyzed || 0} trend="+8%" color="#6366f1" icon="code" />
+                <StatCard label="Hypothesis Validated" value={digest?.stats?.ideasGenerated || 0} color="#10b981" icon="psychology" />
+                <StatCard label="System Health" value="OPTIMAL" color="#f59e0b" icon="verified" />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 32 }}>
+                <section>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)' }}>Top Research Signals</h2>
+                    <button onClick={() => setTab('papers')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }}>View Library</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {filteredPapers.slice(0, 3).map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
+                  </div>
+                </section>
+
+                <section>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)' }}>Codebase Trends</h2>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {filteredRepos.slice(0, 4).map((r, i) => (
+                      <div key={i} className="premium-card" style={{ padding: 16 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--on-surface)' }}>{r.name?.split('/')[1]}</span>
+                          <span style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700 }}>{r.language}</span>
                         </div>
-                        <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--on-surface)', marginBottom: 4 }}>{item.title}</h4>
-                        <div style={{ display: 'inline-flex', padding: '2px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: 10, color: 'var(--on-surface-variant)', fontWeight: 600 }}>{item.meta}</div>
+                        <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', lineHeight: 1.4, marginBottom: 12 }}>{r.description?.slice(0, 80)}...</p>
+                        <div style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 600 }}>★ {r.stars}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </div>
+          )}
+
+          {/* ── Papers Tab ── */}
+          {tab === 'papers' && (
+            <div className="animate-fade">
+              <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 300 }}>
+                  <span className="material-symbols-outlined" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--outline)' }}>search</span>
+                  <input
+                    value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search titles, abstracts, or areas..."
+                    style={{
+                      width: '100%', background: 'white', border: '1px solid var(--outline-variant)',
+                      borderRadius: '12px', padding: '14px 16px 14px 48px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {['all', 'Should Build', 'Should Learn', 'Should Watch'].map(f => (
+                    <button key={f} onClick={() => setFilter(f)} style={{
+                      background: filter === f ? 'var(--primary)' : 'white',
+                      border: `1px solid ${filter === f ? 'var(--primary)' : 'var(--outline-variant)'}`,
+                      color: filter === f ? 'white' : 'var(--on-surface-variant)',
+                      borderRadius: '8px', padding: '0 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer'
+                    }}>{f === 'all' ? 'All Signals' : f.replace('Should ', '')}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(500px, 1fr))', gap: 24 }}>
+                {filteredPapers.map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
+              </div>
+              {filteredPapers.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--outline)' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 48, marginBottom: 16 }}>search_off</span>
+                  <p>No research matches your filters.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Repos Tab ── */}
+          {tab === 'repos' && (
+            <div className="animate-fade">
+              <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 300 }}>
+                  <span className="material-symbols-outlined" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--outline)' }}>search</span>
+                  <input
+                    value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Audit repositories..."
+                    style={{
+                      width: '100%', background: 'white', border: '1px solid var(--outline-variant)',
+                      borderRadius: '12px', padding: '14px 16px 14px 48px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 24 }}>
+                {filteredRepos.map((r, i) => <RepoCard key={i} repo={r} index={i} />)}
+              </div>
+            </div>
+          )}
+
+          {/* ── Chat Tab ── */}
+          {tab === 'chat' && (
+            <div className="animate-fade" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 220px)' }}>
+              <div className="premium-card" style={{ flex: 1, marginBottom: 24, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ flex: 1, padding: 32, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, background: '#f8fafc' }}>
+                  {chatMessages.length === 0 && (
+                    <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--outline)', maxWidth: 400 }}>
+                      <div style={{ padding: 20, background: 'white', borderRadius: '50%', width: 80, height: 80, margin: '0 auto 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--outline-variant)' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 40, color: 'var(--primary)' }}>forum</span>
+                      </div>
+                      <h3 style={{ color: 'var(--on-surface)', marginBottom: 8 }}>Research Assistant</h3>
+                      <p style={{ fontSize: 14 }}>Ask questions about the latest GenAI breakthroughs or your custom library.</p>
+                    </div>
+                  )}
+                  {chatMessages.map((m, i) => (
+                    <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                      <div style={{
+                        background: m.role === 'user' ? 'var(--primary)' : 'white',
+                        color: m.role === 'user' ? 'white' : 'var(--on-surface)',
+                        padding: '16px 20px', borderRadius: '16px',
+                        boxShadow: 'var(--shadow-sm)', fontSize: 14, lineHeight: 1.6,
+                        border: m.role === 'user' ? 'none' : '1px solid var(--outline-variant)'
+                      }}>
+                        {m.content}
+                      </div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--outline)', marginTop: 4, textAlign: m.role === 'user' ? 'right' : 'left', textTransform: 'uppercase' }}>
+                        {m.role === 'user' ? 'Inquiry' : 'Neural Response'}
                       </div>
                     </div>
                   ))}
-                </div>
-                <div style={{ padding: 16, borderTop: '1px solid var(--outline-variant)' }}>
-                  <button onClick={() => setTab('trends')} style={{ width: '100%', background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>View All Intelligence</button>
-                </div>
-              </section>
-            </div>
-          </div>
-        )}
-
-        {/* ── Papers Tab ── */}
-        {tab === 'papers' && (
-          <div className="animate-fade">
-            <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: 300 }}>
-                <span className="material-symbols-outlined" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--outline)' }}>search</span>
-                <input
-                  value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Search across 1.2M+ papers..."
-                  style={{
-                    width: '100%', background: 'white', border: '1px solid var(--outline-variant)',
-                    borderRadius: '12px', padding: '14px 16px 14px 48px', color: 'var(--on-surface)', fontSize: 14, outline: 'none',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {['all', 'Should Build', 'Should Learn', 'Should Watch', 'Should Ignore'].map(f => (
-                  <button key={f} onClick={() => setFilter(f)} style={{
-                    background: filter === f ? 'var(--primary)' : 'white',
-                    border: `1px solid ${filter === f ? 'var(--primary)' : 'var(--outline-variant)'}`,
-                    color: filter === f ? 'white' : 'var(--on-surface-variant)',
-                    borderRadius: '8px', padding: '0 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}>{f === 'all' ? 'All Signals' : f.replace('Should ', '')}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <p style={{ color: 'var(--on-surface-variant)', fontSize: 13, fontWeight: 600 }}>Showing {filteredPapers.length} analysis results</p>
-              <button className="btn-secondary" style={{ padding: '8px 16px', fontSize: 12 }}>Sort: Relevance</button>
-            </div>
-            {filteredPapers.length === 0 && (
-              <div className="premium-card" style={{ textAlign: 'center', padding: 64, color: 'var(--outline)' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 48, marginBottom: 16 }}>manage_search</span>
-                <p>No research matches your current filters.</p>
-              </div>
-            )}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(600px, 1fr))', gap: 24 }}>
-              {filteredPapers.map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
-            </div>
-          </div>
-        )}
-
-        {/* ── Repos Tab ── */}
-        {tab === 'repos' && (
-          <div className="animate-fade">
-            <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: 300 }}>
-                <span className="material-symbols-outlined" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--outline)' }}>search</span>
-                <input
-                  value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Audit technical repositories..."
-                  style={{
-                    width: '100%', background: 'white', border: '1px solid var(--outline-variant)',
-                    borderRadius: '12px', padding: '14px 16px 14px 48px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {['all', 'Should Build', 'Should Learn', 'Should Watch'].map(f => (
-                  <button key={f} onClick={() => setFilter(f)} style={{
-                    background: filter === f ? 'var(--primary)' : 'white',
-                    border: `1px solid ${filter === f ? 'var(--primary)' : 'var(--outline-variant)'}`,
-                    color: filter === f ? 'white' : 'var(--on-surface-variant)',
-                    borderRadius: '8px', padding: '0 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer'
-                  }}>{f === 'all' ? 'All Repos' : f.replace('Should ', '')}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 24 }}>
-              {filteredRepos.map((r, i) => <RepoCard key={i} repo={r} index={i} />)}
-            </div>
-          </div>
-        )}
-
-        {/* ── Chat Tab ── */}
-        {tab === 'chat' && (
-          <div className="animate-fade" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 200px)' }}>
-            <div className="premium-card" style={{ padding: '16px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ padding: 8, background: '#eff6ff', color: 'var(--primary)', borderRadius: '8px' }}>
-                <span className="material-symbols-outlined">terminal</span>
-              </div>
-              <div>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--on-surface)' }}>Research Console</h2>
-                <p style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>Direct neural interface for multi-modal analysis</p>
-              </div>
-            </div>
-            
-            <div className="premium-card" style={{ flex: 1, marginBottom: 24, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ flex: 1, padding: 32, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, background: '#f8fafc' }}>
-                {chatMessages.length === 0 && (
-                  <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--outline)' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 48, marginBottom: 16, display: 'block' }}>forum</span>
-                    <p style={{ fontSize: 14, fontWeight: 500 }}>Awaiting your research inquiry...</p>
-                  </div>
-                )}
-                {chatMessages.map((m, i) => (
-                  <div key={i} style={{
-                    alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                    maxWidth: '80%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8
-                  }}>
-                    <div style={{
-                      background: m.role === 'user' ? 'var(--primary)' : 'white',
-                      color: m.role === 'user' ? 'white' : 'var(--on-surface)',
-                      padding: '16px 20px',
-                      borderRadius: m.role === 'user' ? '16px 16px 0 16px' : '16px 16px 16px 0',
-                      boxShadow: 'var(--shadow-sm)',
-                      fontSize: 14,
-                      lineHeight: 1.6,
-                      border: m.role === 'user' ? 'none' : '1px solid var(--outline-variant)'
-                    }}>
-                      {m.content}
+                  {isChatting && (
+                    <div style={{ alignSelf: 'flex-start', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--primary)', fontSize: 13, fontWeight: 600 }}>
+                      <span className="material-symbols-outlined" style={{ animation: 'spin 2s linear infinite' }}>autorenew</span>
+                      Synthesizing...
                     </div>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--outline)', textAlign: m.role === 'user' ? 'right' : 'left', textTransform: 'uppercase' }}>
-                      {m.role === 'user' ? 'You' : 'OpenScholar AI'}
-                    </span>
-                  </div>
-                ))}
-                {isChatting && (
-                  <div style={{ alignSelf: 'flex-start', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--primary)', fontSize: 13, fontWeight: 600 }}>
-                    <span className="material-symbols-outlined" style={{ animation: 'spin 2s linear infinite' }}>autorenew</span>
-                    Synthesizing response...
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <div style={{ padding: 24, background: 'white', borderTop: '1px solid var(--outline-variant)' }}>
-                <div style={{ position: 'relative', display: 'flex', gap: 12 }}>
-                  <input
-                    value={chatInput} onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleChat()}
-                    placeholder="Ask about specific papers, trends, or technical audits..."
-                    style={{
-                      flex: 1, background: '#f1f5f9', border: '1px solid var(--outline-variant)', borderRadius: '12px',
-                      padding: '14px 20px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
-                    }}
-                  />
-                  <button onClick={handleChat} disabled={isChatting || !chatInput.trim()} className="btn-primary" style={{ padding: '0 24px', borderRadius: '12px' }}>
-                    <span className="material-symbols-outlined">send</span>
-                  </button>
+                <div style={{ padding: 24, background: 'white', borderTop: '1px solid var(--outline-variant)' }}>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <input
+                      value={chatInput} onChange={e => setChatInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleChat()}
+                      placeholder="e.g. What are the latest trends in RAG optimization?"
+                      style={{
+                        flex: 1, background: '#f1f5f9', border: '1px solid var(--outline-variant)', borderRadius: '12px',
+                        padding: '14px 20px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
+                      }}
+                    />
+                    <button onClick={handleChat} disabled={isChatting || !chatInput.trim()} className="btn-primary" style={{ padding: '0 24px', borderRadius: '12px' }}>
+                      <span className="material-symbols-outlined">send</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Trends Tab ── */}
-        {tab === 'trends' && (
-          <div className="animate-fade">
-            <div className="premium-card" style={{ padding: 32, marginBottom: 40, background: 'linear-gradient(135deg, white, #f8faff)', borderLeft: '4px solid var(--primary)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <span className="material-symbols-outlined" style={{ color: 'var(--primary)' }}>radar</span>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--on-surface)' }}>Trend Radar</h2>
-              </div>
-              <p style={{ fontSize: 16, color: 'var(--on-surface-variant)', lineHeight: 1.7 }}>
-                {liveTrends?.weeklySummary || "Global breakthroughs in multi-modal LLMs and autonomous agents are accelerating. Our neural trace identifies a significant shift towards room-temperature superconductivity and targeted nano-delivery systems."}
-              </p>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 24 }}>
-              {(liveTrends?.trends || [
-                { topic: 'Neural Architecture', direction: 'up', count: 124, explanation: 'Massive shift towards sparse MoE models for edge device deployment.', relatedPapers: ['ArXiv:2403.1102', 'ArXiv:2403.1105'] },
-                { topic: 'Bio-Computing', direction: 'up', count: 82, explanation: 'Synthetic protein folding via geometric deep learning showing 40% accuracy gains.', relatedPapers: ['Nature:Bio-2024'] },
-                { topic: 'Quantum Safety', direction: 'stable', count: 45, explanation: 'Post-quantum cryptography standards finalizing for institutional integration.', relatedPapers: ['NIST-PQ-04'] },
-              ]).map((t, i) => (
-                <div key={i} className="premium-card" style={{ padding: 24 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--on-surface)' }}>{t.topic}</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', background: t.direction === 'up' ? '#ecfdf5' : '#f8fafc', color: t.direction === 'up' ? '#10b981' : 'var(--outline)', borderRadius: '4px', fontSize: 10, fontWeight: 700 }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{t.direction === 'up' ? 'trending_up' : 'trending_flat'}</span>
-                      {t.direction?.toUpperCase()} // {t.count} NODES
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', marginBottom: 20, lineHeight: 1.6 }}>{t.explanation}</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {(t.relatedPapers || []).map((rp, idx) => (
-                      <span key={idx} style={{ padding: '4px 8px', background: '#f1f5f9', borderRadius: '4px', fontSize: 10, color: 'var(--primary)', fontWeight: 600 }}>{rp}</span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Ideas Tab ── */}
-        {tab === 'ideas' && (
-          <div className="animate-fade">
-            {/* Hypothesis Validation Module */}
-            <div className="premium-card" style={{
-              background: 'linear-gradient(135deg, white, #eff6ff)',
-              padding: 32, marginBottom: 40, position: 'relative', overflow: 'hidden'
-            }}>
-              <div style={{ position: 'relative', zIndex: 10 }}>
+          {/* ── Ideas / Hypothesis Tab ── */}
+          {tab === 'ideas' && (
+            <div className="animate-fade">
+              <div className="premium-card" style={{ background: 'linear-gradient(135deg, white, #eff6ff)', padding: 32, marginBottom: 40 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                   <span className="material-symbols-outlined" style={{ color: 'var(--primary)' }}>psychology</span>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)' }}>Hypothesis Validation</h2>
+                  <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--on-surface)' }}>Hypothesis Validator</h2>
                 </div>
-                <p style={{ color: 'var(--on-surface-variant)', fontSize: 14, marginBottom: 24 }}>
-                  Input a project idea to receive an instant feasibility verdict based on our 1.2M+ paper dataset.
+                <p style={{ color: 'var(--on-surface-variant)', fontSize: 15, marginBottom: 24 }}>
+                  Input a project idea to receive a feasibility verdict based on the current research landscape.
                 </p>
                 <div style={{ display: 'flex', gap: 12 }}>
                   <input
                     value={validateInput}
                     onChange={e => setValidateInput(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleValidateIdea()}
-                    placeholder="Describe your research project or product idea..."
+                    placeholder="Describe your AI project or hypothesis..."
                     style={{
                       flex: 1, background: 'white', border: '1px solid var(--outline-variant)',
                       borderRadius: '12px', padding: '14px 18px', color: 'var(--on-surface)', fontSize: 14, outline: 'none'
@@ -827,207 +745,210 @@ export default function App() {
                     {isValidating ? 'Analyzing...' : 'Validate'}
                   </button>
                 </div>
-              </div>
-              {validateResult && (
-                <div className="animate-fade" style={{ marginTop: 32, background: 'white', borderRadius: '12px', border: '1px solid var(--outline-variant)', padding: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-                    <span style={{
-                      background: validateResult.verdict === 'BUILD' ? '#ecfdf5' : '#fef3c7',
-                      color: validateResult.verdict === 'BUILD' ? '#10b981' : '#d97706',
-                      padding: '4px 16px', borderRadius: '20px', fontSize: 12, fontWeight: 800
-                    }}>{validateResult.verdict}</span>
-                    <span style={{ fontSize: 12, color: 'var(--outline)', fontWeight: 600 }}>Time to MVP: {validateResult.mvpTime}</span>
-                  </div>
-                  <p style={{ color: 'var(--on-surface)', fontSize: 14, lineHeight: 1.6, marginBottom: 16 }}>{validateResult.verdictReason}</p>
-                  <div style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid var(--primary)' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>Unique Angle: </span>
-                    <span style={{ color: 'var(--on-surface-variant)', fontSize: 13 }}>{validateResult.suggestedTwist}</span>
-                  </div>
-                </div>
-              )}
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(450px, 1fr))', gap: 24 }}>
-              {ideas.map((idea, idx) => (
-                <div key={idx} className="premium-card animate-fade" style={{ padding: 24, animationDelay: `${idx * 0.1}s` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                {validateResult && (
+                  <div className="animate-fade" style={{ marginTop: 32, background: 'white', borderRadius: '12px', border: '1px solid var(--outline-variant)', padding: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                      <span style={{
+                        background: validateResult.verdict === 'BUILD' ? '#ecfdf5' : '#fef3c7',
+                        color: validateResult.verdict === 'BUILD' ? '#10b981' : '#d97706',
+                        padding: '4px 16px', borderRadius: '20px', fontSize: 12, fontWeight: 800
+                      }}>{validateResult.verdict}</span>
+                      <span style={{ fontSize: 12, color: 'var(--outline)', fontWeight: 600 }}>Estimated Time: {validateResult.mvpTime}</span>
+                    </div>
+                    <p style={{ color: 'var(--on-surface)', fontSize: 15, lineHeight: 1.6, marginBottom: 16 }}>{validateResult.verdictReason}</p>
+                    <div style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid var(--primary)' }}>
+                      <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>PIVOT SUGGESTION: </span>
+                      <span style={{ color: 'var(--on-surface-variant)', fontSize: 14 }}>{validateResult.suggestedTwist}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 24 }}>
+                {(digest?.buildIdeas || []).map((idea, idx) => (
+                  <div key={idx} className="premium-card" style={{ padding: 24 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                      <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)' }}>{idea.name}</h3>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--primary)' }}>{idea.impactScore}</div>
+                        <div style={{ fontSize: 9, color: 'var(--outline)', fontWeight: 800 }}>IMPACT</div>
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.5, marginBottom: 20 }}>{idea.solution}</p>
+                    <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 700 }}>{idea.difficulty?.toUpperCase()} LEVEL</span>
+                      <button onClick={() => handleGeneratePitch(idx)} className="btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }}>
+                        {loadingPitch === idx ? 'Generating...' : 'Pitch Plan'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Trends Tab ── */}
+          {tab === 'trends' && (
+            <div className="animate-fade">
+              <div className="premium-card" style={{ padding: 40, marginBottom: 40, borderLeft: '5px solid var(--primary)' }}>
+                <h2 style={{ fontSize: 24, fontWeight: 800, color: 'var(--on-surface)', marginBottom: 16 }}>Intelligence Summary</h2>
+                <p style={{ fontSize: 16, color: 'var(--on-surface-variant)', lineHeight: 1.7 }}>
+                  {liveTrends?.weeklySummary || "Loading latest intelligence synthesis..."}
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 24 }}>
+                {(liveTrends?.trends || []).map((t, i) => (
+                  <div key={i} className="premium-card" style={{ padding: 24 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--on-surface)' }}>{t.topic}</h3>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: t.direction === 'up' ? '#10b981' : '#64748b', background: t.direction === 'up' ? '#ecfdf5' : '#f1f5f9', padding: '2px 8px', borderRadius: '4px' }}>
+                        {t.direction?.toUpperCase()}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.6, marginBottom: 16 }}>{t.explanation}</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {t.relatedPapers?.map((p, idx) => (
+                        <span key={idx} style={{ fontSize: 10, background: '#f8fafc', border: '1px solid var(--outline-variant)', padding: '2px 6px', borderRadius: '4px' }}>{p}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Snap Result Tab ── */}
+          {tab === 'snap' && (
+            <div className="animate-fade">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 32 }}>
+                <div className="premium-card" style={{ padding: 24, height: 'fit-content' }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Visual Input</h3>
+                  {selectedImage && (
+                    <img src={selectedImage} alt="Input" style={{ width: '100%', borderRadius: '12px', marginBottom: 20, border: '1px solid var(--outline-variant)' }} />
+                  )}
+                  {imageResearchData?.imageAnalysis && (
                     <div>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                        <span style={{ padding: '2px 8px', background: '#eff6ff', color: 'var(--primary)', borderRadius: '4px', fontSize: 10, fontWeight: 700 }}>{idea.actionLabel || 'BUILD'}</span>
-                        <span style={{ padding: '2px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: 10, color: 'var(--outline)', fontWeight: 600 }}>{idea.difficulty?.toUpperCase()}</span>
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase', marginBottom: 4 }}>Main Problem</div>
+                        <p style={{ fontSize: 14, color: 'var(--on-surface)', fontWeight: 600 }}>{imageResearchData.imageAnalysis.mainProblem}</p>
                       </div>
-                      <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--on-surface)', marginBottom: 4 }}>{idea.name}</h3>
-                      <p style={{ fontSize: 12, color: 'var(--primary)', fontStyle: 'italic', fontWeight: 600 }}>"{idea.pitchLine}"</p>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)', lineHeight: 1 }}>{idea.impactScore}</div>
-                      <div style={{ fontSize: 10, color: 'var(--outline)', fontWeight: 700 }}>IMPACT SCORE</div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                    <div style={{ padding: 12, background: '#fff1f2', borderRadius: '8px' }}>
-                      <div style={{ fontSize: 9, fontWeight: 800, color: '#e11d48', marginBottom: 4 }}>TARGET PROBLEM</div>
-                      <p style={{ fontSize: 12, color: '#9f1239', lineHeight: 1.5 }}>{idea.problem}</p>
-                    </div>
-                    <div style={{ padding: 12, background: '#f0fdf4', borderRadius: '8px' }}>
-                      <div style={{ fontSize: 9, fontWeight: 800, color: '#16a34a', marginBottom: 4 }}>PROPOSED SOLUTION</div>
-                      <p style={{ fontSize: 12, color: '#166534', lineHeight: 1.5 }}>{idea.solution}</p>
-                    </div>
-                  </div>
-
-                  <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 700 }}>AUDIENCE: {idea.targetUsers?.toUpperCase()}</span>
-                    <button onClick={() => handleGeneratePitch(idx)} className="btn-secondary" style={{ padding: '8px 16px', fontSize: 12 }}>
-                      {loadingPitch === idx ? 'Generating...' : 'Generate Pitch'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {pitchModal && (
-          <div className="animate-fade" style={{
-            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', zIndex: 9999,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, backdropFilter: 'blur(12px)'
-          }} onClick={() => setPitchModal(null)}>
-            <div className="premium-card animate-scale" style={{
-              background: 'white', padding: 40, maxWidth: 800, width: '100%', maxHeight: '90vh',
-              overflowY: 'auto', position: 'relative'
-            }} onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 40 }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--primary)', marginBottom: 8 }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>campaign</span>
-                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pitch Package Extracted</span>
-                  </div>
-                  <h2 style={{ fontSize: 28, fontWeight: 800, color: 'var(--on-surface)', letterSpacing: '-0.01em' }}>{pitchModal.ideaName}</h2>
-                </div>
-                <button onClick={() => setPitchModal(null)} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
-                  <span className="material-symbols-outlined" style={{ color: 'var(--outline)' }}>close</span>
-                </button>
-              </div>
-
-              <div style={{ background: '#eff6ff', borderRadius: '16px', padding: 32, marginBottom: 32, border: '1px solid #dbeafe' }}>
-                <p style={{ fontSize: 18, color: 'var(--primary)', lineHeight: 1.7, fontWeight: 600 }}>{pitchModal.pitch.elevatorPitch}</p>
-              </div>
-
-              <div style={{ display: 'grid', gap: 32 }}>
-                <div>
-                  <h4 style={{ fontSize: 12, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>Operational Script</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {pitchModal.pitch.demoScript?.map((step, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 16, padding: 16, background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--primary)' }}>{i + 1}</span>
-                        <p style={{ fontSize: 14, color: 'var(--on-surface)', lineHeight: 1.5 }}>{step}</p>
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase', marginBottom: 8 }}>Detected Domains</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {imageResearchData.imageAnalysis.possibleDomains?.map((d, i) => (
+                            <span key={i} style={{ padding: '2px 8px', background: '#eff6ff', color: 'var(--primary)', borderRadius: '4px', fontSize: 11, fontWeight: 600 }}>{d}</span>
+                          ))}
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-                  <div style={{ padding: 24, background: '#fffbeb', borderRadius: '16px', border: '1px solid #fef3c7' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: '#d97706' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>stars</span>
-                      <span style={{ fontSize: 12, fontWeight: 800 }}>JUDGES HOOK</span>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>Correlated Research Nodes</h2>
+                  {isAnalyzingImage ? (
+                    <div className="premium-card" style={{ padding: 64, textAlign: 'center' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 48, animation: 'spin 2s linear infinite', color: 'var(--primary)', marginBottom: 16 }}>autorenew</span>
+                      <h3>Synthesizing Visual Knowledge...</h3>
                     </div>
-                    <p style={{ fontSize: 14, color: '#92400e', lineHeight: 1.6 }}>{pitchModal.pitch.judgesHook}</p>
-                  </div>
-                  <div style={{ padding: 24, background: '#f0fdf4', borderRadius: '16px', border: '1px solid #dcfce7' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: '#16a34a' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>schedule</span>
-                      <span style={{ fontSize: 12, fontWeight: 800 }}>WHY NOW</span>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {imageResearchData?.papers?.map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
+                      {!imageResearchData?.papers?.length && <p>No specific papers found for this visual query.</p>}
                     </div>
-                    <p style={{ fontSize: 14, color: '#166534', lineHeight: 1.6 }}>{pitchModal.pitch.whyNow}</p>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Settings Tab ── */}
-        {tab === 'settings' && (
-          <div className="animate-fade" style={{ maxWidth: 800 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--on-surface)', marginBottom: 32 }}>System Configuration</h2>
-
-            <div style={{ display: 'grid', gap: 24 }}>
-              <div className="premium-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)', marginBottom: 16 }}>Communication Vetting</h3>
-                <p style={{ color: 'var(--on-surface-variant)', fontSize: 13, marginBottom: 20 }}>Verify SMTP connectivity and notification delivery vectors.</p>
+          {/* ── Settings Tab ── */}
+          {tab === 'settings' && (
+            <div className="animate-fade" style={{ maxWidth: 800 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 32 }}>System Configuration</h2>
+              
+              <div className="premium-card" style={{ padding: 32, marginBottom: 24 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Communication Test</h3>
                 <div style={{ display: 'flex', gap: 12 }}>
-                  <input
+                  <input 
                     value={emailInput} onChange={e => setEmailInput(e.target.value)}
-                    placeholder="Enter recipient email..."
-                    type="email"
-                    style={{
-                      flex: 1, background: '#f8fafc', border: '1px solid var(--outline-variant)',
-                      borderRadius: '8px', padding: '12px 16px', color: 'var(--on-surface)', fontSize: 13, outline: 'none'
-                    }}
+                    placeholder="Enter email to test SMTP..." 
+                    style={{ flex: 1, padding: '12px 16px', border: '1px solid var(--outline-variant)', borderRadius: '8px', outline: 'none' }}
                   />
-                  <button onClick={sendEmail} className="btn-secondary" style={{ padding: '0 24px' }}>
+                  <button onClick={sendTestEmail} className="btn-secondary" style={{ padding: '0 24px' }}>
                     {emailStatus === 'sending' ? 'Sending...' : 'Test Sync'}
                   </button>
                 </div>
               </div>
 
-              <div className="premium-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)', marginBottom: 20 }}>Execution Log</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {(status?.runHistory || []).map((r, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ width: 8, height: 8, background: r.success ? '#10b981' : '#ef4444', borderRadius: '50%' }} />
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--on-surface)' }}>{new Date(r.runAt).toLocaleString()}</span>
+              <div className="premium-card" style={{ padding: 32 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Pipeline History</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {status?.runHistory?.map((h, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--outline-variant)' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{new Date(h.runAt).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: h.success ? 'var(--success)' : 'var(--error)' }}>
+                        {h.success ? `SUCCESS // ${h.papers}P` : `FAILED // ${h.error?.slice(0, 20)}`}
                       </div>
-                      <span style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 700 }}>
-                        {r.success ? `PAYLOAD: ${r.papers}P // ${r.repos}R` : `FAILURE: ${r.error?.slice(0, 30)}`}
-                      </span>
                     </div>
                   ))}
+                  {!status?.runHistory?.length && <p style={{ fontSize: 13, color: 'var(--outline)' }}>No execution records found.</p>}
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="premium-card" style={{ padding: 24, background: '#f8fafc' }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)', marginBottom: 16 }}>Security Environment</h3>
-                <pre style={{ fontSize: 11, color: 'var(--outline)', lineHeight: 1.8, background: 'white', padding: 20, borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  {`ANTHROPIC_API_KEY=********************\nGITHUB_TOKEN=********************\nRESEARCH_TOPICS=LLM,RAG,AGENTS,MULTIMODAL`}
-                </pre>
+        </main>
+      </div>
+
+      {/* Pitch Modal */}
+      {pitchModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={() => setPitchModal(null)}>
+          <div className="premium-card animate-fade" style={{ background: 'white', maxWidth: 800, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 40 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
+              <h2 style={{ fontSize: 24, fontWeight: 800 }}>{pitchModal.ideaName}</h2>
+              <button onClick={() => setPitchModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            
+            <div style={{ background: '#f0f7ff', padding: 24, borderRadius: '12px', marginBottom: 32, border: '1px solid #cce3ff' }}>
+              <p style={{ fontSize: 18, fontWeight: 600, color: 'var(--primary)', lineHeight: 1.6 }}>{pitchModal.pitch.elevatorPitch}</p>
+            </div>
+
+            <div style={{ marginBottom: 32 }}>
+              <h4 style={{ fontSize: 12, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase', marginBottom: 16 }}>Demo Script</h4>
+              {pitchModal.pitch.demoScript?.map((s, i) => (
+                <div key={i} style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', marginBottom: 8, fontSize: 14 }}>
+                  <span style={{ fontWeight: 800, marginRight: 12 }}>{i + 1}</span> {s}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              <div style={{ padding: 20, background: '#fffbeb', borderRadius: '12px' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#d97706', marginBottom: 8 }}>JUDGES HOOK</div>
+                <p style={{ fontSize: 14, color: '#92400e' }}>{pitchModal.pitch.judgesHook}</p>
+              </div>
+              <div style={{ padding: 20, background: '#f0fdf4', borderRadius: '12px' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#16a34a', marginBottom: 8 }}>WHY NOW</div>
+                <p style={{ fontSize: 14, color: '#166534' }}>{pitchModal.pitch.whyNow}</p>
               </div>
             </div>
           </div>
-        )}
-      </main>
+        </div>
+      )}
 
-      {/* Institutional Footer */}
-      <footer style={{
-        borderTop: '1px solid var(--outline-variant)', padding: '32px 40px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        background: 'white'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ width: 24, height: 24, background: 'var(--primary)', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 16, color: 'white' }}>school</span>
-          </div>
-          <span style={{ color: 'var(--on-surface-variant)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-            OpenScholar AI // Institutional Protocol // v4.2.0
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 32, alignItems: 'center' }}>
-          {digest?.generatedAt && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 6, height: 6, background: '#10b981', borderRadius: '50%' }} />
-              <span style={{ color: 'var(--outline)', fontSize: 11, fontWeight: 600 }}>
-                System Synced: {new Date(digest.generatedAt).toLocaleTimeString()}
-              </span>
-            </div>
-          )}
-          <span style={{ color: 'var(--outline)', fontSize: 11, fontWeight: 600 }}>© 2026 Advanced Research Labs</span>
-        </div>
-      </footer>
-    </div>
+      {/* Global CSS for Animations & Icons */}
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.2); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .sidebar-link.active .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+      `}</style>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     </div>
   )
 }
