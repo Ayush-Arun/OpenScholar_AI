@@ -4,6 +4,7 @@
 
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
 const { runFullPipeline, getStatus, getLatestDigest } = require("../services/digestService");
 const { sendDigest, sendTestEmail } = require("../services/emailService");
 const { fetchArxivPapers } = require("../agents/scoutAgent");
@@ -12,9 +13,21 @@ const { analyzePaper } = require("../agents/analystAgent");
 const { validateIdea } = require("../agents/ideasAgent");
 const { generatePitch } = require("../agents/pitchAgent");
 const { chatWithResearch, generateTrends, explainPaper } = require("../services/claudeService");
+const { analyzeImageAndFetchPapers, generateBuildPlan } = require("../services/imageResearchService");
+const { fetchPapersFromQuery, buildArxivQuery, queryCache } = require("../services/webSearchService");
 
 // In-memory cache for paper explanations
 const explanationCache = {};
+
+// ── Multer (memory storage – no disk write) ───────────────────────────────────
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only image files are allowed"));
+  }
+});
 
 // GET /api/status - System status
 router.get("/status", (req, res) => {
@@ -65,6 +78,53 @@ router.get("/papers/fetch", async (req, res) => {
     res.json({ success: true, count: papers.length, papers });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/papers/search - Dynamic web search by query with caching
+router.post("/papers/search", async (req, res) => {
+  const { query } = req.body;
+  if (!query || typeof query !== "string") {
+    return res.status(400).json({ success: false, error: "query (string) is required" });
+  }
+
+  const digest = getLatestDigest();
+  const localPapers = digest?.papers || [];
+
+  // Score local papers first
+  const { calculateSimilarity } = require("../services/webSearchService");
+  const scored = localPapers.map(p => ({
+    paper: p,
+    score: calculateSimilarity(query, `${p.title} ${p.abstract} ${p.researchArea}`)
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  const bestLocalScore = scored[0]?.score || 0;
+  const topLocal = scored.filter(s => s.score >= 2).map(s => s.paper);
+
+  if (topLocal.length >= 3) {
+    // Local data is sufficient
+    return res.json({
+      source: "local",
+      arxivQuery: null,
+      fromCache: false,
+      papers: topLocal.slice(0, 15),
+      answer: ""
+    });
+  }
+
+  // Fetch from web
+  try {
+    const arxivQuery = buildArxivQuery(query);
+    const { papers, fromCache } = await fetchPapersFromQuery(query, 15);
+    res.json({
+      source: "web",
+      arxivQuery,
+      fromCache,
+      papers,
+      answer: ""
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message || "Could not fetch papers from web. Try again." });
   }
 });
 
@@ -124,15 +184,15 @@ router.get("/trends", async (req, res) => {
   }
 });
 
-// POST /api/research-chat - Ask questions about papers
+// POST /api/research-chat - Ask questions about papers (local RAG → web fallback)
 router.post("/research-chat", async (req, res) => {
   const { question } = req.body;
   if (!question) return res.status(400).json({ error: "question required" });
-  
+
   const digest = getLatestDigest();
   try {
     const result = await chatWithResearch(question, digest);
-    res.json(result);
+    res.json(result); // now always includes: source, answer, sources, fetchedPapers
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -246,6 +306,50 @@ router.post("/ideas/:index/pitch", async (req, res) => {
   console.log(`[API] Generating pitch for idea[${idx}]: ${idea.name}`);
   const result = await generatePitch(idea);
   res.json(result);
+});
+
+// POST /api/image-research - Snap2Research: analyze image and fetch related papers
+router.post("/image-research", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No image file provided. Upload an image with field name 'image'." });
+    }
+
+    const base64Image = req.file.buffer.toString("base64");
+    const mimeType = req.file.mimetype || "image/jpeg";
+
+    console.log(`[API] Snap2Research request: ${req.file.originalname} (${req.file.size} bytes, ${mimeType})`);
+
+    const { imageAnalysis, papers } = await analyzeImageAndFetchPapers(base64Image, mimeType);
+
+    res.json({
+      success: true,
+      imageAnalysis,
+      papers
+    });
+  } catch (err) {
+    console.error("[API] Snap2Research error:", err.message);
+    res.status(err.code === "NO_RESEARCH_SIGNAL" ? 422 : 500).json({
+      success: false,
+      error: err.message || "Failed to analyze image. Please try again."
+    });
+  }
+});
+
+// POST /api/snap2research/build-plan - Generate full project blueprint from image analysis
+router.post("/snap2research/build-plan", async (req, res) => {
+  try {
+    const { imageAnalysis, papers } = req.body;
+    if (!imageAnalysis || !imageAnalysis.mainProblem) {
+      return res.status(400).json({ success: false, error: "imageAnalysis is required." });
+    }
+    console.log("[API] Generating build plan for:", imageAnalysis.mainProblem?.slice(0, 60));
+    const buildPlan = await generateBuildPlan(imageAnalysis, papers || []);
+    res.json({ success: true, buildPlan });
+  } catch (err) {
+    console.error("[API] Build plan error:", err.message);
+    res.status(500).json({ success: false, error: err.message || "Failed to generate build plan." });
+  }
 });
 
 module.exports = router;

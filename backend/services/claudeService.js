@@ -1,48 +1,81 @@
-const Anthropic = require("@anthropic-ai/sdk");
+const { generateAIResponse } = require("./aiRouter");
+const { fetchPapersFromQuery, generateRAGAnswerFromWeb, calculateSimilarity } = require("./webSearchService");
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "your_key_here"
-});
-
-// Helper for basic TF-IDF / Keyword scoring for simple RAG
-function calculateSimilarity(query, text) {
-  if (!text) return 0;
-  const qWords = query.toLowerCase().split(/\W+/).filter(w => w.length > 2);
-  const tWords = text.toLowerCase().split(/\W+/).filter(w => w.length > 2);
-  let score = 0;
-  for (const qw of qWords) {
-    if (tWords.includes(qw)) score++;
-  }
-  return score;
-}
+// LOCAL RAG threshold — if best local paper scores below this, go to the web
+const LOCAL_RELEVANCE_THRESHOLD = 2;
 
 async function chatWithResearch(question, digest) {
-  if (!digest || !digest.papers || digest.papers.length === 0) {
-    return {
-      answer: "I don't have any research papers in my context right now. Please run the pipeline first.",
-      sources: []
-    };
+  const localPapers = digest?.papers || [];
+
+  // ── Score local papers ────────────────────────────────────────────────────
+  let topDocs = [];
+  let maxScore = 0;
+
+  if (localPapers.length > 0) {
+    const scoredPapers = localPapers.map(p => {
+      const textToSearch = `${p.title} ${p.abstract} ${p.keyContributions?.join(" ")} ${p.researchArea}`;
+      return { paper: p, score: calculateSimilarity(question, textToSearch) };
+    });
+    scoredPapers.sort((a, b) => b.score - a.score);
+    maxScore = scoredPapers[0]?.score || 0;
+    topDocs = scoredPapers.slice(0, 5).filter(sp => sp.score > 0 || scoredPapers.indexOf(sp) < 3).map(sp => sp.paper);
   }
 
-  // Simple Retrieval: Score papers based on keyword overlap
-  const scoredPapers = digest.papers.map(p => {
-    const textToSearch = `${p.title} ${p.abstract} ${p.keyContributions?.join(" ")} ${p.researchArea}`;
-    return {
-      paper: p,
-      score: calculateSimilarity(question, textToSearch)
-    };
-  });
+  // ── Decide: local or web? ─────────────────────────────────────────────────
+  const useWeb = maxScore < LOCAL_RELEVANCE_THRESHOLD;
 
-  // Sort and pick top 5
-  scoredPapers.sort((a, b) => b.score - a.score);
-  const topDocs = scoredPapers.slice(0, 5).filter(sp => sp.score > 0 || scoredPapers.indexOf(sp) < 3).map(sp => sp.paper);
+  if (useWeb) {
+    console.log(`[ChatRAG] Local score too low (${maxScore}), falling back to web for: "${question}"`);
+    try {
+      const { papers: webPapers } = await fetchPapersFromQuery(question, 15);
+      if (webPapers.length === 0) {
+        return {
+          source: "web",
+          answer: "Could not fetch papers from web. Try again.",
+          sources: [],
+          fetchedPapers: []
+        };
+      }
 
+      const answer = await generateRAGAnswerFromWeb(question, webPapers);
+
+      return {
+        source: "web",
+        answer,
+        sources: webPapers.slice(0, 5).map(p => ({
+          title: p.title,
+          authors: p.authors?.slice(0, 3).join(", "),
+          url: p.arxivUrl,
+          relevanceReason: "Fetched live from arXiv for your query."
+        })),
+        fetchedPapers: webPapers.slice(0, 10).map(p => ({
+          title: p.title,
+          authors: p.authors || [],
+          abstract: p.abstract,
+          publishedDate: p.published,
+          arxivUrl: p.arxivUrl,
+          pdfUrl: p.pdfUrl,
+          categories: p.categories || []
+        }))
+      };
+    } catch (err) {
+      console.error("[ChatRAG] Web fallback error:", err.message);
+      return {
+        source: "web",
+        answer: "Could not fetch papers from web. Try again.",
+        sources: [],
+        fetchedPapers: []
+      };
+    }
+  }
+
+  // ── Local RAG path ────────────────────────────────────────────────────────
   const contextText = topDocs.map((p, i) => `
-[Paper ${i+1}]
+[Paper ${i + 1}]
 Title: ${p.title}
 Authors: ${p.authors?.join(", ")}
 Abstract: ${p.abstract}
-Link: ${p.arxivUrl || p.pdfUrl || ''}
+Link: ${p.arxivUrl || p.pdfUrl || ""}
 `).join("\n");
 
   const prompt = `You are a research assistant. Answer the user question using ONLY the provided paper context.
@@ -68,12 +101,7 @@ Return your answer in the following structure exactly (using Markdown):
 If the context is insufficient to answer the question, say so honestly.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307", // Using haiku for speed
-      max_tokens: 1000,
-      system: "You are a helpful AI research assistant.",
-      messages: [{ role: "user", content: prompt }]
-    });
+    const answer = await generateAIResponse(prompt, { system: "You are a helpful AI research assistant." });
 
     const sources = topDocs.map(p => ({
       title: p.title,
@@ -83,14 +111,17 @@ If the context is insufficient to answer the question, say so honestly.`;
     }));
 
     return {
-      answer: response.content[0].text,
-      sources
+      source: "local",
+      answer,
+      sources,
+      fetchedPapers: []
     };
   } catch (err) {
-    console.error("[Claude RAG] Error:", err.message);
+    console.error("[ChatRAG] AI Error:", err.message);
     throw new Error("Failed to generate research chat response.");
   }
 }
+
 
 async function generateTrends(papers) {
   if (!papers || papers.length === 0) {
@@ -123,19 +154,14 @@ Return ONLY valid JSON in this exact structure:
 Note: Since we don't have historical data, mark direction as "stable" or "up" based on your intuition of the field.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const jsonMatch = response.content[0].text.match(/\{[\s\S]*\}/);
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
-    throw new Error("Failed to parse JSON from Claude");
+    throw new Error("Failed to parse JSON from AI response");
   } catch (err) {
-    console.error("[Claude Trends] Error:", err.message);
+    console.error("[Trends] AI Error:", err.message);
     throw new Error("Failed to generate trends analysis.");
   }
 }
@@ -170,15 +196,10 @@ Return your explanation in this exact structure using Markdown:
 Keep it clear, practical, and useful for students/developers.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 1200,
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    return { explanation: response.content[0].text };
+    const answer = await generateAIResponse(prompt);
+    return { explanation: answer };
   } catch (err) {
-    console.error("[Claude Explain] Error:", err.message);
+    console.error("[Explain] AI Error:", err.message);
     throw new Error("Failed to generate paper explanation.");
   }
 }

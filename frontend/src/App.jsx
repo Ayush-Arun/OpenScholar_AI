@@ -1,16 +1,21 @@
-import { useState, useEffect, useCallback } from 'react'
-import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LineChart, Line, AreaChart, Area } from 'recharts'
 
 // ── API Helper ────────────────────────────────────────────────────────────────
-const API = 'http://localhost:5000/api'
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const api = async (path, opts = {}) => {
   try {
+    console.log(`[API] ${opts.method || 'GET'} ${path}`);
     const r = await fetch(`${API}${path}`, {
       headers: { 'Content-Type': 'application/json' },
       ...opts
     })
+    if (!r.ok) {
+      const errData = await r.json().catch(() => ({}));
+      return { error: errData.error || `HTTP ${r.status}` };
+    }
     return await r.json()
-  } catch { return null }
+  } catch (err) { return null; }
 }
 
 // ── Label Config ──────────────────────────────────────────────────────────────
@@ -21,7 +26,7 @@ const LABELS = {
   'Should Ignore': { color: '#64748b', bg: '#f8fafc', border: '#e2e8f0', icon: 'close' },
 }
 
-// ── Components ────────────────────────────────────────────────────────────────
+// ── Shared UI Components ──────────────────────────────────────────────────────
 
 function ScoreBar({ value = 0, color = 'var(--primary)' }) {
   return (
@@ -36,8 +41,32 @@ function ScoreBar({ value = 0, color = 'var(--primary)' }) {
   )
 }
 
-function LabelBadge({ label }) {
-  const cfg = LABELS[label] || LABELS['Should Watch']
+const StatCard = ({ label, value, sub, color = 'var(--primary)' }) => (
+  <div className="card" style={{ padding: 20, flex: 1, minWidth: 200 }}>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>{label}</div>
+    <div style={{ fontSize: 32, fontWeight: 800, color: color, marginBottom: 4 }}>{value}</div>
+    {sub && <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>{sub}</div>}
+  </div>
+)
+
+const ScoreBar = ({ value = 0, color = 'var(--primary)' }) => (
+  <div style={{ background: '#F3F4F6', borderRadius: 99, height: 5, width: '100%', overflow: 'hidden' }}>
+    <div style={{ background: color, height: '100%', width: `${Math.min(100, value)}%`, borderRadius: 99, transition: 'width 1s ease' }} />
+  </div>
+)
+
+const PageHeader = ({ title, description, actions }) => (
+  <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div><h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>{title}</h1><p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{description}</p></div>
+    <div style={{ display: 'flex', gap: 12 }}>{actions}</div>
+  </div>
+)
+
+// ── Feature Cards ─────────────────────────────────────────────────────────────
+
+const PaperCard = ({ paper, index }) => {
+  const [expanded, setExpanded] = useState(false); const [explainMode, setExplainMode] = useState('beginner'); const [explanation, setExplanation] = useState(null); const [isExplaining, setIsExplaining] = useState(false)
+  const handleExplain = async () => { setExpanded(true); if (!explanation) { setIsExplaining(true); const r = await api(`/papers/${index}/explain`, { method: 'POST', body: JSON.stringify({ mode: explainMode }) }); if (r?.explanation) setExplanation({ text: r.explanation }); setIsExplaining(false) } }
   return (
     <span style={{
       background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
@@ -119,7 +148,10 @@ function PaperCard({ paper, index }) {
             <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase' }}>Score</div>
           </div>
         </div>
-      </div>
+      </>
+    )}
+  </div>
+)
 
       <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.6, marginBottom: 20 }}>
         {paper.tldr || paper.abstract?.slice(0, 180) + '...'}
@@ -215,6 +247,8 @@ function RepoCard({ repo, index }) {
   ]
   const colors = ['#3b82f6', '#10b981', '#f59e0b', '#6366f1']
 
+const AuthModal = ({ mode, setMode, onClose, onAuth }) => {
+  const [email, setEmail] = useState(''); const [pass, setPass] = useState(''); const [name, setName] = useState('')
   return (
     <div className="premium-card animate-fade" style={{ padding: 24, marginBottom: 16, animationDelay: `${index * 0.05}s` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
@@ -253,7 +287,8 @@ function RepoCard({ repo, index }) {
   )
 }
 
-function TrendCard({ trend, index }) {
+const ProfileDropdown = ({ user, onLogout }) => {
+  const [open, setOpen] = useState(false)
   return (
     <div className="premium-card animate-fade" style={{ padding: '16px 20px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 16, animationDelay: `${index * 0.08}s` }}>
       <div style={{ fontSize: 24, padding: 12, background: '#f8fafc', borderRadius: '12px' }}>{trend.emoji}</div>
@@ -270,44 +305,14 @@ function TrendCard({ trend, index }) {
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [digest, setDigest] = useState(null)
-  const [status, setStatus] = useState(null)
-  const [tab, setTab] = useState('overview')
-  const [isRunning, setIsRunning] = useState(false)
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('all')
-  const [notification, setNotification] = useState(null)
-  const [emailInput, setEmailInput] = useState('')
-  const [emailStatus, setEmailStatus] = useState(null)
-  const [validateInput, setValidateInput] = useState('')
-  const [validateResult, setValidateResult] = useState(null)
-  const [isValidating, setIsValidating] = useState(false)
-  const [pitchModal, setPitchModal] = useState(null)
-  const [loadingPitch, setLoadingPitch] = useState(null)
-  const [isSendingEmail, setIsSendingEmail] = useState(false)
-
-  const [chatMessages, setChatMessages] = useState([])
-  const [chatInput, setChatInput] = useState('')
-  const [isChatting, setIsChatting] = useState(false)
-
-  const [liveTrends, setLiveTrends] = useState(null)
-  const [isLoadingTrends, setIsLoadingTrends] = useState(false)
-
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-
-  const notify = (msg, type = 'success') => {
-    setNotification({ msg, type })
-    setTimeout(() => setNotification(null), 4000)
-  }
-
-  const loadData = useCallback(async () => {
-    const [d, s] = await Promise.all([api('/digest'), api('/status')])
-    if (d) setDigest(d)
-    if (s) setStatus(s)
-  }, [])
-
+  const [user, setUser] = useState(null); const [authMode, setAuthMode] = useState(null)
+  const [digest, setDigest] = useState(null); const [status, setStatus] = useState(null); const [tab, setTab] = useState('overview'); const [isRunning, setIsRunning] = useState(false); const [notification, setNotification] = useState(null)
+  
+  const loadData = useCallback(async () => { const d = await api('/digest'); const s = await api('/status'); if (d && !d.error) setDigest(d); if (s && !s.error) setStatus(s) }, [])
   useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { const interval = setInterval(async () => { const s = await api('/status'); if (s && !s.error) { setStatus(s); if (!s.isRunning && isRunning) { setIsRunning(false); loadData(); setNotification({ msg: '✅ Sync complete!', type: 'success' }); setTimeout(() => setNotification(null), 4000) } } }, 3000); return () => clearInterval(interval) }, [isRunning, loadData])
 
   useEffect(() => {
     if (tab === 'trends' && !liveTrends && !isLoadingTrends && digest?.papers?.length > 0) {

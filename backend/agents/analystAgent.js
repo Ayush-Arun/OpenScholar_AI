@@ -4,9 +4,7 @@
 // Scores: Relevance, Novelty, Clarity, Practicality
 // ============================================
 
-const OpenAI = require("openai");
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { generateAIResponse } = require("../services/aiRouter");
 
 // ── Paper Analysis ────────────────────────────────────────────────────────────
 
@@ -50,14 +48,8 @@ Scoring rules:
   * Should Watch: overallScore >= 50
   * Should Ignore: overallScore < 50`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     const analysis = JSON.parse(cleaned);
 
     return { ...paper, ...analysis, analyzedAt: new Date().toISOString() };
@@ -123,14 +115,8 @@ Scoring rules:
 - reproducibilityScore: estimate from stars/forks ratio
 - usabilityLabel must be exactly: "Should Build", "Should Learn", "Should Watch", or "Should Ignore"`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     const analysis = JSON.parse(cleaned);
 
     return { ...repo, ...analysis, analyzedAt: new Date().toISOString() };
@@ -181,14 +167,8 @@ Return ONLY valid JSON:
   "hotKeywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6"]
 }`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     return JSON.parse(cleaned);
   } catch (err) {
     console.error("[AnalystAgent] Trend detection error:", err.message);
