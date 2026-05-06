@@ -1,12 +1,4 @@
-// ============================================
-// PITCH AGENT
-// Generates pitch content, PPT outline and
-// demo script for a given project idea
-// ============================================
-
-const OpenAI = require("openai");
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { generateAIResponse } = require("../services/aiRouter");
 
 async function generatePitch(idea) {
   try {
@@ -47,14 +39,8 @@ Return ONLY valid JSON (no markdown):
   "callToAction": "What you want judges / investors to do after the pitch"
 }`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }]
-    });
-
-    const text = response.choices[0]?.message?.content || "{}";
-    const cleaned = text.replace(/```json|```/g, "").trim();
+    const content = await generateAIResponse(prompt, { useJson: true });
+    const cleaned = content.replace(/```json|```/g, "").trim();
     const pitch = JSON.parse(cleaned);
 
     console.log(`[PitchAgent] Generated pitch for: ${idea.name}`);
