@@ -290,8 +290,15 @@ export default function App() {
   const [liveTrends, setLiveTrends] = useState(null)
   const [isLoadingTrends, setIsLoadingTrends] = useState(false)
 
-  // Snap2Research State
-  const [selectedImage, setSelectedImage] = useState(null)
+  // Auth State
+  const [user, setUser] = useState(null)
+  const [authModal, setAuthModal] = useState(null) // 'login' | 'signup' | null
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [authForm, setAuthForm] = useState({ username: '', email: '', password: '' })
+
+  // Search State
+  const [searchResults, setSearchResults] = useState(null)
+  const [isSearching, setIsSearching] = useState(false)
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
   const [imageResearchData, setImageResearchData] = useState(null)
   const fileInputRef = useRef(null)
@@ -346,6 +353,26 @@ export default function App() {
     setIsRunning(true)
     notify('🚀 Pipeline started! Scouting papers & repos...', 'info')
     await api('/pipeline/run', { method: 'POST', body: JSON.stringify({ skipEmail: true }) })
+  }
+
+  const handleGlobalSearch = async () => {
+    if (!search.trim() || isSearching) return
+    setIsSearching(true)
+    setTab('search')
+    notify(`🔍 Searching for "${search}"...`, 'info')
+    
+    const r = await api('/papers/search', { 
+      method: 'POST', 
+      body: JSON.stringify({ query: search }) 
+    })
+    
+    if (r && !r.error) {
+      setSearchResults(r)
+      notify(`✅ Found ${r.papers?.length || 0} results ${r.source === 'web' ? 'from ArXiv' : 'in dashboard'}`)
+    } else {
+      notify(`❌ Search failed: ${r?.error}`, 'error')
+    }
+    setIsSearching(false)
   }
 
   const handleChat = async () => {
@@ -421,6 +448,47 @@ export default function App() {
     const r = await api('/email/test', { method: 'POST', body: JSON.stringify({ email: emailInput }) })
     setEmailStatus(r?.success ? 'sent' : 'error')
     notify(r?.success ? '✅ Test email sent!' : `❌ Error: ${r?.error}`, r?.success ? 'success' : 'error')
+  }
+
+  const handleAuth = (e) => {
+    e.preventDefault()
+    if (authModal === 'signup') {
+      if (!authForm.username || !authForm.email || !authForm.password) {
+        notify('Please fill all fields', 'error')
+        return
+      }
+      setUser({ username: authForm.username, email: authForm.email })
+      notify('✅ Account created successfully!')
+    } else {
+      if (!authForm.email || !authForm.password) {
+        notify('Please fill all fields', 'error')
+        return
+      }
+      setUser({ username: authForm.email.split('@')[0], email: authForm.email })
+      notify('✅ Logged in successfully!')
+    }
+    setAuthModal(null)
+    setAuthForm({ username: '', email: '', password: '' })
+  }
+
+  const handleLogout = () => {
+    setUser(null)
+    setShowProfileDropdown(false)
+    notify('Logged out')
+  }
+
+  const handleSocialLogin = (provider) => {
+    notify(`Connecting to ${provider}...`, 'info')
+    
+    setTimeout(() => {
+      setUser({ 
+        username: provider === 'Google' ? 'G_Researcher' : 'Git_Dev', 
+        email: provider === 'Google' ? 'researcher@gmail.com' : 'dev@github.com',
+        avatar: provider === 'Google' ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Google' : 'https://api.dicebear.com/7.x/avataaars/svg?seed=GitHub'
+      })
+      notify(`✅ Successfully logged in with ${provider}!`)
+      setAuthModal(null)
+    }, 1000)
   }
 
   const filteredPapers = (digest?.papers || []).filter(p => {
@@ -506,6 +574,7 @@ export default function App() {
                 type="text" 
                 value={search}
                 onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleGlobalSearch()}
                 placeholder="Global search..." 
                 style={{
                   background: '#f1f5f9', border: '1px solid var(--outline-variant)', borderRadius: '100px', padding: '8px 16px 8px 40px',
@@ -513,20 +582,61 @@ export default function App() {
                 }} 
               />
             </div>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#e2e8f0', border: '1px solid var(--outline-variant)', overflow: 'hidden' }}>
-              <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
-            </div>
+            
+            {user ? (
+              <div style={{ position: 'relative' }}>
+                <button 
+                  onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                  style={{ 
+                    display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0
+                  }}
+                >
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--on-surface)' }}>{user.username}</div>
+                    <div style={{ fontSize: 10, color: 'var(--outline)', fontWeight: 600 }}>{user.email}</div>
+                  </div>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--primary)', border: '2px solid white', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', boxShadow: 'var(--shadow-sm)' }}>
+                    {user.avatar ? <img src={user.avatar} alt="User" style={{ width: '100%', height: '100%' }} /> : <span className="material-symbols-outlined" style={{ fontSize: 20 }}>person</span>}
+                  </div>
+                </button>
+
+                {showProfileDropdown && (
+                  <div className="animate-fade" style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: 12, width: 200,
+                    background: 'white', borderRadius: '12px', border: '1px solid var(--outline-variant)',
+                    boxShadow: 'var(--shadow-lg)', overflow: 'hidden', zIndex: 100
+                  }}>
+                    <div style={{ padding: '16px', borderBottom: '1px solid var(--outline-variant)', background: '#f8fafc' }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--outline)', textTransform: 'uppercase', marginBottom: 4 }}>Account</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>{user.username}</div>
+                    </div>
+                    <button onClick={handleLogout} style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+                      background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 13, fontWeight: 600
+                    }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>logout</span>
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button onClick={() => setAuthModal('login')} className="btn-secondary" style={{ padding: '8px 16px', fontSize: 13 }}>Login</button>
+                <button onClick={() => setAuthModal('signup')} className="btn-primary" style={{ padding: '8px 16px', fontSize: 13 }}>Sign Up</button>
+              </div>
+            )}
           </div>
         </header>
 
         {notification && (
           <div className="animate-fade" style={{
-            position: 'fixed', bottom: 32, right: 32, zIndex: 1000,
+            position: 'fixed', top: 32, left: '50%', transform: 'translateX(-50%)', zIndex: 10000,
             background: notification.type === 'error' ? '#fee2e2' : notification.type === 'info' ? '#eff6ff' : '#ecfdf5',
             color: notification.type === 'error' ? '#b91c1c' : notification.type === 'info' ? '#2563eb' : '#047857',
-            border: '1px solid currentColor',
+            border: `1px solid ${notification.type === 'error' ? '#f87171' : notification.type === 'info' ? '#60a5fa' : '#34d399'}`,
             padding: '12px 24px', borderRadius: '12px', fontWeight: 600, fontSize: 14,
-            boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', gap: 10
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)', display: 'flex', alignItems: 'center', gap: 10
           }}>
             <span className="material-symbols-outlined" style={{fontSize: 20}}>{notification.type === 'error' ? 'error' : notification.type === 'info' ? 'info' : 'check_circle'}</span>
             {notification.msg}
@@ -864,6 +974,44 @@ export default function App() {
             </div>
           )}
 
+          {/* ── Search Tab ── */}
+          {tab === 'search' && (
+            <div className="animate-fade">
+              <div style={{ marginBottom: 32 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <span className="material-symbols-outlined" style={{ color: 'var(--primary)', fontSize: 28 }}>travel_explore</span>
+                  <h2 style={{ fontSize: 24, fontWeight: 800, color: 'var(--on-surface)' }}>Global Discovery</h2>
+                </div>
+                <p style={{ color: 'var(--on-surface-variant)', fontSize: 15 }}>
+                  Synthesized results for <span style={{ fontWeight: 700, color: 'var(--primary)' }}>"{search}"</span> 
+                  {searchResults?.source === 'web' ? ' fetched from ArXiv Live' : ' from local dashboard'}.
+                </p>
+              </div>
+
+              {isSearching ? (
+                <div className="premium-card" style={{ padding: 80, textAlign: 'center' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 48, animation: 'spin 2s linear infinite', color: 'var(--primary)', marginBottom: 20 }}>query_stats</span>
+                  <h3>Synthesizing Deep Research...</h3>
+                  <p style={{ color: 'var(--outline)', marginTop: 8 }}>Polling ArXiv API and cross-referencing local data.</p>
+                </div>
+              ) : (
+                <div>
+                  {searchResults?.papers?.length > 0 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(500px, 1fr))', gap: 24 }}>
+                      {searchResults.papers.map((p, i) => <PaperCard key={i} paper={p} index={i} />)}
+                    </div>
+                  ) : (
+                    <div className="premium-card" style={{ padding: 80, textAlign: 'center' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--outline)', marginBottom: 20 }}>search_off</span>
+                      <h3>No results found for "{search}"</h3>
+                      <p style={{ color: 'var(--outline)', marginTop: 8 }}>Try adjusting your query or broadening your keywords.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Settings Tab ── */}
           {tab === 'settings' && (
             <div className="animate-fade" style={{ maxWidth: 800 }}>
@@ -902,6 +1050,141 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* Auth Modal */}
+      {authModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(8px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={() => setAuthModal(null)}>
+          <div className="premium-card animate-scale" style={{ background: 'white', maxWidth: 900, width: '100%', display: 'flex', overflow: 'hidden', borderRadius: '24px', position: 'relative', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }} onClick={e => e.stopPropagation()}>
+            <button onClick={() => setAuthModal(null)} style={{ position: 'absolute', top: 24, right: 24, background: '#f1f5f9', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--on-surface)', zIndex: 10, transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background = '#e2e8f0'} onMouseOut={e => e.currentTarget.style.background = '#f1f5f9'}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>close</span>
+            </button>
+            
+            {/* Left Branding Side */}
+            <div style={{ flex: 1, background: 'linear-gradient(135deg, var(--primary), #312e81)', padding: 48, color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, background: 'rgba(255,255,255,0.1)', borderRadius: '50%', filter: 'blur(40px)' }}></div>
+              <div style={{ position: 'absolute', bottom: -50, left: -50, width: 200, height: 200, background: 'rgba(255,255,255,0.1)', borderRadius: '50%', filter: 'blur(40px)' }}></div>
+              
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 64 }}>
+                  <div style={{ width: 40, height: 40, background: 'white', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 24 }}>science</span>
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em' }}>OpenScholar <span style={{ opacity: 0.8 }}>AI</span></div>
+                </div>
+
+                <h2 style={{ fontSize: 36, fontWeight: 800, lineHeight: 1.2, marginBottom: 24, letterSpacing: '-0.02em' }}>
+                  {authModal === 'signup' ? 'Accelerate your research pipeline.' : 'Welcome back to the cutting edge.'}
+                </h2>
+                <p style={{ fontSize: 16, lineHeight: 1.6, opacity: 0.8, fontWeight: 400 }}>
+                  Synthesize millions of ArXiv papers, uncover codebase trends, and validate hypotheses in seconds.
+                </p>
+              </div>
+
+              <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', gap: -8 }}>
+                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Alex" alt="User" style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid var(--primary)', background: 'white' }} />
+                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Sam" alt="User" style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid var(--primary)', background: 'white', marginLeft: -12 }} />
+                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jordan" alt="User" style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid var(--primary)', background: 'white', marginLeft: -12 }} />
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.9 }}>Join 10,000+ top researchers.</div>
+              </div>
+            </div>
+
+            {/* Right Form Side */}
+            <div style={{ flex: 1, padding: '48px 64px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div style={{ marginBottom: 32 }}>
+                <h2 style={{ fontSize: 28, fontWeight: 800, color: 'var(--on-surface)', marginBottom: 8, letterSpacing: '-0.02em' }}>{authModal === 'signup' ? 'Create an account' : 'Sign in'}</h2>
+                <p style={{ fontSize: 14, color: 'var(--on-surface-variant)' }}>
+                  {authModal === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
+                  <button onClick={() => setAuthModal(authModal === 'signup' ? 'login' : 'signup')} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 700, cursor: 'pointer', fontSize: 14, padding: 0 }}>
+                    {authModal === 'signup' ? 'Log in' : 'Sign up'}
+                  </button>
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                <button type="button" onClick={() => handleSocialLogin('Google')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%', padding: '12px', background: 'white', border: '1px solid var(--outline-variant)', borderRadius: '12px', fontSize: 14, fontWeight: 600, color: 'var(--on-surface)', cursor: 'pointer', transition: 'all 0.2s', boxShadow: 'var(--shadow-sm)' }} onMouseOver={e => e.currentTarget.style.background = '#f8fafc'} onMouseOut={e => e.currentTarget.style.background = 'white'}>
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" style={{ width: 20, height: 20 }} />
+                  Continue with Google
+                </button>
+                <button type="button" onClick={() => handleSocialLogin('GitHub')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%', padding: '12px', background: '#24292e', border: '1px solid #24292e', borderRadius: '12px', fontSize: 14, fontWeight: 600, color: 'white', cursor: 'pointer', transition: 'all 0.2s', boxShadow: 'var(--shadow-sm)' }} onMouseOver={e => e.currentTarget.style.background = '#1b1f23'} onMouseOut={e => e.currentTarget.style.background = '#24292e'}>
+                  <svg height="20" viewBox="0 0 16 16" width="20" fill="white"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+                  Continue with GitHub
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--outline-variant)' }}></div>
+                <div style={{ fontSize: 12, color: 'var(--outline)', fontWeight: 600, textTransform: 'uppercase' }}>Or continue with email</div>
+                <div style={{ flex: 1, height: 1, background: 'var(--outline-variant)' }}></div>
+              </div>
+
+              <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {authModal === 'signup' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>Username</label>
+                    <input 
+                      value={authForm.username}
+                      onChange={e => setAuthForm({...authForm, username: e.target.value})}
+                      placeholder="e.g. researcher42"
+                      style={{ padding: '12px 16px', border: '1px solid var(--outline-variant)', borderRadius: '10px', fontSize: 14, outline: 'none', background: '#f8fafc', transition: 'border-color 0.2s', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }} 
+                      onFocus={e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.background = 'white'; }}
+                      onBlur={e => { e.target.style.borderColor = 'var(--outline-variant)'; e.target.style.background = '#f8fafc'; }}
+                    />
+                  </div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>Email Address</label>
+                  <input 
+                    type="email"
+                    value={authForm.email}
+                    onChange={e => setAuthForm({...authForm, email: e.target.value})}
+                    placeholder="name@institution.edu"
+                    style={{ padding: '12px 16px', border: '1px solid var(--outline-variant)', borderRadius: '10px', fontSize: 14, outline: 'none', background: '#f8fafc', transition: 'border-color 0.2s', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }} 
+                    onFocus={e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.background = 'white'; }}
+                    onBlur={e => { e.target.style.borderColor = 'var(--outline-variant)'; e.target.style.background = '#f8fafc'; }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>Password</label>
+                    {authModal === 'login' && (
+                      <button type="button" style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+                    )}
+                  </div>
+                  <input 
+                    type="password"
+                    value={authForm.password}
+                    onChange={e => setAuthForm({...authForm, password: e.target.value})}
+                    placeholder="••••••••"
+                    style={{ padding: '12px 16px', border: '1px solid var(--outline-variant)', borderRadius: '10px', fontSize: 14, outline: 'none', background: '#f8fafc', transition: 'border-color 0.2s', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)' }} 
+                    onFocus={e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.background = 'white'; }}
+                    onBlur={e => { e.target.style.borderColor = 'var(--outline-variant)'; e.target.style.background = '#f8fafc'; }}
+                  />
+                </div>
+                
+                {authModal === 'login' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 4 }}>
+                    <input type="checkbox" style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }} />
+                    <span style={{ fontSize: 13, color: 'var(--on-surface-variant)' }}>Remember me for 30 days</span>
+                  </label>
+                )}
+                
+                <button type="submit" className="btn-primary" style={{ marginTop: 16, padding: '14px', fontSize: 15, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  {authModal === 'signup' ? 'Create Account' : 'Sign In'}
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_forward</span>
+                </button>
+              </form>
+              
+              {authModal === 'signup' && (
+                <p style={{ fontSize: 12, color: 'var(--outline)', textAlign: 'center', marginTop: 24, lineHeight: 1.5 }}>
+                  By signing up, you agree to our <a href="#" style={{ color: 'var(--on-surface-variant)', fontWeight: 600, textDecoration: 'underline' }}>Terms of Service</a> and <a href="#" style={{ color: 'var(--on-surface-variant)', fontWeight: 600, textDecoration: 'underline' }}>Privacy Policy</a>.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pitch Modal */}
       {pitchModal && (
