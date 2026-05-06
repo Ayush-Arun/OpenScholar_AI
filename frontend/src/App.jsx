@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
 
 // ── API Helper ────────────────────────────────────────────────────────────────
-const API = 'http://localhost:5000/api'
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const api = async (path, opts = {}) => {
   try {
     const r = await fetch(`${API}${path}`, {
